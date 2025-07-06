@@ -1,6 +1,268 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Save, X, Code2, Copy, Wand2, CheckCircle } from "lucide-react";
+import { Save, X, Code2, Copy, Wand2, CheckCircle, Eye, EyeOff } from "lucide-react";
+
+// Token types and interfaces (simplified from AnimatedCodeDisplay)
+interface CodeToken {
+  type: "tag" | "text" | "attribute" | "string" | "keyword" | "operator" | "punctuation" | "number" | "comment" | "whitespace";
+  content: string;
+  id: string;
+}
+
+// Auto-detect language from code content
+const detectLanguageForPreview = (code: string): string => {
+  if (/<[^>]+>/.test(code)) return "html";
+  if (/\b(function|const|let|var|=>)\b/.test(code)) return "javascript";
+  if (/\b(def|import|class|if __name__)\b/.test(code)) return "python";
+  if (/\{[^}]*:[^}]*\}/.test(code)) return "css";
+  if (/^\s*[{[]/.test(code.trim())) return "json";
+  return "html"; // default
+};
+
+// Simplified tokenizer based on AnimatedCodeDisplay
+const tokenizeCodeForPreview = (code: string, language: string): CodeToken[] => {
+  const tokens: CodeToken[] = [];
+
+  if (language === "html") {
+    const htmlRegex = /(<\/?[a-zA-Z][^>]*>)|(\s+)|([^<\s]+)/g;
+    let match;
+
+    while ((match = htmlRegex.exec(code)) !== null) {
+      const content = match[0];
+      const startPos = match.index;
+
+      if (match[1]) {
+        // HTML tag - parse for attributes
+        const tagContent = content;
+        const tagRegex = /(<\/?[a-zA-Z][a-zA-Z0-9]*)|(\s+)|([a-zA-Z-]+)(=)("[^"]*"|'[^']*'|[^\s>]+)?|(>)/g;
+        let tagMatch;
+        let subIndex = 0;
+
+        while ((tagMatch = tagRegex.exec(tagContent)) !== null) {
+          const part = tagMatch[0];
+          let type: CodeToken["type"] = "tag";
+
+          if (tagMatch[1]) type = "tag"; // Tag name
+          else if (tagMatch[2]) type = "whitespace"; // Whitespace
+          else if (tagMatch[3]) type = "attribute"; // Attribute name
+          else if (tagMatch[4]) type = "operator"; // Equals sign
+          else if (tagMatch[5]) type = "string"; // Attribute value
+          else if (tagMatch[6]) type = "tag"; // Closing >
+
+          if (part) {
+            tokens.push({
+              type,
+              content: part,
+              id: `${type}-${startPos}-${subIndex}`,
+            });
+            subIndex++;
+          }
+        }
+      } else if (match[2]) {
+        // Whitespace
+        tokens.push({
+          type: "whitespace",
+          content: content,
+          id: `whitespace-${startPos}`,
+        });
+      } else {
+        // Text content
+        tokens.push({
+          type: "text",
+          content: content,
+          id: `text-${startPos}`,
+        });
+      }
+    }
+  } else {
+    // JavaScript/other languages tokenizer
+    let i = 0;
+    while (i < code.length) {
+      const char = code[i];
+      const nextChar = code[i + 1];
+
+      // Single-line comments
+      if (char === "/" && nextChar === "/") {
+        const start = i;
+        let end = i + 2;
+        while (end < code.length && code[end] !== "\n") end++;
+        tokens.push({
+          type: "comment",
+          content: code.substring(start, end),
+          id: `comment-${start}`,
+        });
+        i = end;
+        continue;
+      }
+
+      // Multi-line comments
+      if (char === "/" && nextChar === "*") {
+        const start = i;
+        let end = i + 2;
+        while (end < code.length - 1) {
+          if (code[end] === "*" && code[end + 1] === "/") {
+            end += 2;
+            break;
+          }
+          end++;
+        }
+        tokens.push({
+          type: "comment",
+          content: code.substring(start, end),
+          id: `comment-${start}`,
+        });
+        i = end;
+        continue;
+      }
+
+      // String literals
+      if (char === '"' || char === "'" || char === "`") {
+        const quote = char;
+        const start = i;
+        let end = i + 1;
+        while (end < code.length) {
+          if (code[end] === quote && code[end - 1] !== "\\") {
+            end++;
+            break;
+          }
+          end++;
+        }
+        tokens.push({
+          type: "string",
+          content: code.substring(start, end),
+          id: `string-${start}`,
+        });
+        i = end;
+        continue;
+      }
+
+      // Whitespace
+      if (/\s/.test(char)) {
+        const start = i;
+        let end = i;
+        while (end < code.length && /\s/.test(code[end])) end++;
+        tokens.push({
+          type: "whitespace",
+          content: code.substring(start, end),
+          id: `whitespace-${start}`,
+        });
+        i = end;
+        continue;
+      }
+
+      // Numbers
+      if (/[0-9]/.test(char)) {
+        const start = i;
+        let end = i;
+        while (end < code.length && /[0-9.]/.test(code[end])) end++;
+        tokens.push({
+          type: "number",
+          content: code.substring(start, end),
+          id: `number-${start}`,
+        });
+        i = end;
+        continue;
+      }
+
+      // Operators and punctuation
+      if (/[{}[\]();,.:=+\-*/%<>!&|]/.test(char)) {
+        tokens.push({
+          type: "operator",
+          content: char,
+          id: `operator-${i}`,
+        });
+        i++;
+        continue;
+      }
+
+      // Keywords and identifiers
+      if (/[a-zA-Z_$]/.test(char)) {
+        const start = i;
+        let end = i;
+        while (end < code.length && /[a-zA-Z0-9_$]/.test(code[end])) end++;
+        const word = code.substring(start, end);
+        
+        // Check if it's a keyword
+        const keywords = {
+          javascript: ["function", "const", "let", "var", "if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return", "try", "catch", "finally", "throw", "class", "extends", "import", "export", "from", "as", "async", "await", "new", "this", "super", "typeof", "instanceof", "in", "of", "delete", "void", "null", "undefined", "true", "false"],
+          python: ["def", "class", "if", "elif", "else", "for", "while", "try", "except", "finally", "with", "as", "import", "from", "return", "yield", "break", "continue", "pass", "global", "nonlocal", "lambda", "and", "or", "not", "in", "is", "None", "True", "False"],
+        };
+        
+        const langKeywords = keywords[language as keyof typeof keywords] || [];
+        const isKeyword = langKeywords.includes(word);
+        
+        tokens.push({
+          type: isKeyword ? "keyword" : "text",
+          content: word,
+          id: `${isKeyword ? "keyword" : "text"}-${start}`,
+        });
+        i = end;
+        continue;
+      }
+
+      // Everything else
+      tokens.push({
+        type: "text",
+        content: char,
+        id: `text-${i}`,
+      });
+      i++;
+    }
+  }
+
+  return tokens;
+};
+
+// Get color for tokens (matching AnimatedCodeDisplay) - kept for reference
+// const getTokenColor = (token: CodeToken): string => {
+//   switch (token.type) {
+//     case "tag": return "#ff6b6b";
+//     case "attribute": return "#a8e6cf";
+//     case "keyword": return "#4ecdc4";
+//     case "string": return "#95e1d3";
+//     case "number": return "#ff8b94";
+//     case "operator": return "#fce38a";
+//     case "comment": return "#6c757d";
+//     case "punctuation": return "#ffd93d";
+//     default: return "#ffffff";
+//   }
+// };
+
+// Simple CodePreview component that reuses AnimatedCodeDisplay's logic
+const CodePreview: React.FC<{ code: string; language: string }> = ({ code, language }) => {
+  const tokens = useMemo(() => {
+    return tokenizeCodeForPreview(code, language);
+  }, [code, language]);
+
+  const tokenStyles = {
+    tag: { color: "#ff6b6b" },
+    attribute: { color: "#a8e6cf" }, 
+    keyword: { color: "#4ecdc4" },
+    string: { color: "#95e1d3" },
+    number: { color: "#ff8b94" },
+    operator: { color: "#fce38a" },
+    comment: { color: "#6c757d" },
+    punctuation: { color: "#ffd93d" },
+    text: { color: "#ffffff" },
+    whitespace: { color: "#ffffff" },
+  };
+
+  return (
+    <div className="space-y-1 font-mono">
+      {tokens.map((token) => (
+        <span
+          key={token.id}
+          style={{
+            ...tokenStyles[token.type],
+            whiteSpace: token.type === "whitespace" ? "pre" : "normal",
+          }}
+        >
+          {token.content}
+        </span>
+      ))}
+    </div>
+  );
+};
 
 interface HighlightRange {
   start: number;
@@ -400,6 +662,7 @@ export const StateEditor: React.FC<StateEditorProps> = ({
   const [isSelectingHighlight, setIsSelectingHighlight] = useState(false);
   const [highlightType, setHighlightType] =
     useState<HighlightRange["type"]>("new");
+  const [showPreview, setShowPreview] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -449,9 +712,10 @@ export const StateEditor: React.FC<StateEditorProps> = ({
         const selectedLines = value.substring(lineStart, actualLineEnd);
 
         if (selectedLines.startsWith("  ")) {
+          const twoSpaces = "  ";
           const newValue =
             value.substring(0, lineStart) +
-            selectedLines.replace(/^  /gm, "") +
+            selectedLines.replace(new RegExp(`^${twoSpaces}`, "gm"), "") +
             value.substring(actualLineEnd);
           setCode(newValue);
 
@@ -690,6 +954,7 @@ export const StateEditor: React.FC<StateEditorProps> = ({
                 onChange={(e) =>
                   setHighlightType(e.target.value as HighlightRange["type"])
                 }
+                title="Select highlight type"
                 className="bg-gray-600 text-white px-3 py-1.5 rounded border border-gray-500 text-sm"
               >
                 <option value="new">New Code</option>
@@ -757,6 +1022,7 @@ export const StateEditor: React.FC<StateEditorProps> = ({
                       </div>
                       <button
                         onClick={() => removeHighlight(index)}
+                        title="Remove highlight"
                         className="text-red-400 hover:text-red-300 transition-colors"
                       >
                         <X className="w-3 h-3" />
@@ -793,6 +1059,18 @@ export const StateEditor: React.FC<StateEditorProps> = ({
                 Code
               </label>
               <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => setShowPreview(!showPreview)}
+                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg transition-all text-sm font-medium ${
+                    showPreview
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-600 text-gray-300 hover:bg-gray-500"
+                  }`}
+                  title="Toggle syntax highlighting preview"
+                >
+                  {showPreview ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  <span>{showPreview ? "Hide Preview" : "Show Preview"}</span>
+                </button>
                 {formatMessage && (
                   <motion.div
                     initial={{ opacity: 0, x: 10 }}
@@ -819,24 +1097,57 @@ export const StateEditor: React.FC<StateEditorProps> = ({
                 </button>
               </div>
             </div>
-            <textarea
-              ref={textareaRef}
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onMouseUp={handleTextSelection}
-              placeholder="Paste your code here... (Language will be auto-detected)
+            
+            {/* Responsive layout that adapts to preview state */}
+            <div className={`flex-1 flex gap-4 min-h-0 ${showPreview ? '' : 'w-full'}`}>
+              {/* Code editor - takes full width when preview is hidden */}
+              <div className={`flex flex-col min-h-0 ${showPreview ? 'flex-1' : 'w-full'}`}>
+                <textarea
+                  ref={textareaRef}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  onMouseUp={handleTextSelection}
+                  placeholder="Paste your code here... (Language will be auto-detected)
 
 Try pasting unformatted code like: <div><h1>Hello</h1><p>World</p></div>
 
 Press Tab to indent, Shift+Tab to unindent"
-              className="flex-1 bg-gray-700 text-white px-4 py-3 rounded-lg border border-gray-600 focus:border-yellow-500 focus:outline-none resize-none min-h-0 font-mono"
-              style={{
-                fontSize: "14px",
-                lineHeight: "1.5",
-                tabSize: 2,
-              }}
-            />
+                  className="flex-1 bg-gray-700 text-white px-4 py-3 rounded-lg border border-gray-600 focus:border-yellow-500 focus:outline-none resize-none min-h-0 font-mono text-sm leading-relaxed"
+                />
+              </div>
+              
+              {/* Syntax highlighted preview - only shown when preview is enabled */}
+              {showPreview && (
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  className="flex-1 flex flex-col min-h-0"
+                >
+                  <div className="mb-2">
+                    <div className="text-sm font-medium text-gray-300 mb-1">
+                      Preview with Syntax Highlighting
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      Language: {language}
+                    </div>
+                  </div>
+                  <div className="flex-1 bg-gray-800 border border-gray-600 rounded-lg overflow-auto">
+                    <div className="p-4">
+                      {code.trim() ? (
+                        <CodePreview code={code} language={language} />
+                      ) : (
+                        <div className="text-gray-500 text-sm">
+                          Start typing to see syntax highlighting...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+            
             {code && (
               <div className="mt-2 flex items-center justify-between text-sm">
                 <div className="text-gray-400">
