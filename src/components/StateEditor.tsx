@@ -52,6 +52,93 @@ const isWellFormatted = (code: string, language: string): boolean => {
     return hasProperIndentation && hasMultipleLines && hasConsistentStructure;
   }
 
+  if (language === "javascript" || language === "typescript") {
+    // More strict JavaScript formatting check
+    const hasMultipleLines = lines.length > 1;
+    if (!hasMultipleLines) return false;
+
+    // Check for consistent indentation
+    let hasProperIndentation = false;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmedLine = line.trim();
+      
+      // Skip empty lines
+      if (!trimmedLine) continue;
+
+      // Check for consistent indentation pattern
+      const leadingSpaces = line.length - line.trimStart().length;
+      
+      // If this line ends with {, next non-empty line should be indented more
+      if (trimmedLine.endsWith("{")) {
+        const nextNonEmptyLine = lines.slice(i + 1).find(l => l.trim());
+        if (nextNonEmptyLine) {
+          const nextLeadingSpaces = nextNonEmptyLine.length - nextNonEmptyLine.trimStart().length;
+          const nextTrimmed = nextNonEmptyLine.trim();
+          
+          // Next line should be indented more (unless it's a closing brace)
+          if (!nextTrimmed.startsWith("}") && nextLeadingSpaces <= leadingSpaces) {
+            return false; // Inconsistent indentation
+          }
+          if (nextLeadingSpaces > leadingSpaces) {
+            hasProperIndentation = true;
+          }
+        }
+      }
+      
+      // Check for closing braces - they should be at the right indentation level
+      if (trimmedLine.startsWith("}")) {
+        // Find the opening brace line
+        let braceLevel = 0;
+        for (let j = i - 1; j >= 0; j--) {
+          const prevLine = lines[j].trim();
+          if (prevLine.includes("}")) braceLevel++;
+          if (prevLine.includes("{")) {
+            if (braceLevel === 0) {
+              const openBraceSpaces = lines[j].length - lines[j].trimStart().length;
+              // Closing brace should align with opening brace
+              if (leadingSpaces !== openBraceSpaces) {
+                return false;
+              }
+              break;
+            }
+            braceLevel--;
+          }
+        }
+      }
+      
+      // Check for extremely inconsistent spacing (like the example)
+      if (leadingSpaces > 0 && leadingSpaces % 2 !== 0) {
+        return false; // Odd number of spaces suggests inconsistent formatting
+      }
+      
+      // Check for really bad indentation patterns (excessive spacing)
+      if (leadingSpaces > 8) {
+        return false; // Too much indentation suggests poor formatting
+      }
+      
+      // Check for inconsistent indentation between adjacent lines
+      if (i > 0) {
+        const prevLine = lines[i - 1];
+        const prevTrimmed = prevLine.trim();
+        const prevSpaces = prevLine.length - prevLine.trimStart().length;
+        
+        // If both lines are at the same logical level (no braces between), they should have same indentation
+        if (prevTrimmed && !prevTrimmed.endsWith("{") && !trimmedLine.startsWith("}") && 
+            !prevTrimmed.endsWith(";") && Math.abs(leadingSpaces - prevSpaces) > 2) {
+          return false; // Inconsistent indentation between similar lines
+        }
+      }
+    }
+    
+    // Additional checks for consistent formatting
+    const hasConsistentBraces = !code.match(/\w\{/) && !code.match(/\}\s*else/);
+    const hasProperSpacing = !code.match(/function\w/) && !code.match(/\w\(/);
+    
+    return hasProperIndentation && hasConsistentBraces && hasProperSpacing;
+  }
+
   // For other languages, check for basic formatting
   const hasIndentation = lines.some((line) => line.match(/^\s{2,}/));
   const hasMultipleLines = lines.length > 1;
@@ -199,77 +286,39 @@ const formatHTML = (html: string): string => {
   return formatted.trim();
 };
 
-// More conservative JavaScript formatter
+// Simple and effective JavaScript formatter
 const formatJavaScript = (js: string): string => {
-  // If already formatted, just clean up
-  if (isWellFormatted(js, "javascript")) {
-    return js.replace(/\n\s*\n/g, "\n").trim();
-  }
-
-  let formatted = "";
-  let indent = 0;
+  // Split into lines and normalize indentation
+  const lines = js.split('\n');
+  const formatted = [];
+  let currentIndent = 0;
   const tab = "  ";
-  let inString = false;
-  let stringChar = "";
-
-  for (let i = 0; i < js.length; i++) {
-    const char = js[i];
-    const nextChar = js[i + 1];
-    const prevChar = js[i - 1];
-
-    if (!inString && (char === '"' || char === "'" || char === "`")) {
-      inString = true;
-      stringChar = char;
-      formatted += char;
-    } else if (inString && char === stringChar && prevChar !== "\\") {
-      inString = false;
-      stringChar = "";
-      formatted += char;
-    } else if (!inString) {
-      if (char === "{") {
-        formatted += char;
-        if (nextChar !== "}") {
-          formatted += "\n";
-          indent++;
-          formatted += tab.repeat(indent);
-        }
-      } else if (char === "}") {
-        if (prevChar !== "{") {
-          formatted = formatted.trimEnd() + "\n";
-          indent = Math.max(0, indent - 1);
-          formatted += tab.repeat(indent);
-        }
-        formatted += char;
-        if (
-          nextChar &&
-          nextChar !== "," &&
-          nextChar !== ";" &&
-          nextChar !== ")" &&
-          nextChar !== "}"
-        ) {
-          formatted += "\n" + tab.repeat(indent);
-        }
-      } else if (
-        char === ";" &&
-        nextChar !== " " &&
-        nextChar !== "\n" &&
-        nextChar
-      ) {
-        formatted += char + "\n" + tab.repeat(indent);
-      } else if (char === "\n") {
-        // Skip multiple newlines
-        if (!formatted.endsWith("\n")) {
-          formatted += char;
-        }
-      } else {
-        formatted += char;
-      }
-    } else {
-      formatted += char;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    
+    // Skip empty lines
+    if (!trimmed) {
+      formatted.push('');
+      continue;
+    }
+    
+    // If line starts with closing brace, reduce indent first
+    if (trimmed.startsWith('}')) {
+      currentIndent = Math.max(0, currentIndent - 1);
+    }
+    
+    // Apply current indentation
+    formatted.push(tab.repeat(currentIndent) + trimmed);
+    
+    // If line ends with opening brace, increase indent for next line
+    if (trimmed.endsWith('{')) {
+      currentIndent++;
     }
   }
-
-  return formatted.replace(/\n\s*\n/g, "\n").trim();
+  
+  return formatted.join('\n').trim();
 };
 
 // More conservative CSS formatter
