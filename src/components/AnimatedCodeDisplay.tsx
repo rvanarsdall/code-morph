@@ -160,18 +160,179 @@ const tokenizeCode = (code: string, language: string): CodeToken[] => {
       }
     }
   } else {
-    // For other languages, split by words and operators
-    const generalRegex =
-      /(\s+)|([a-zA-Z_][a-zA-Z0-9_]*)|([0-9]+\.?[0-9]*)|([{}[\]();,.:=+\-*/%<>!&|]+)|(.)/g;
-    let match;
+    // Enhanced JavaScript tokenizer with comment support
+    const tokens: CodeToken[] = [];
+    let i = 0;
 
-    while ((match = generalRegex.exec(code)) !== null) {
-      const content = match[0];
-      const startPos = match.index;
-      let type: CodeToken["type"] = "text";
+    while (i < code.length) {
+      const char = code[i];
+      const nextChar = code[i + 1];
 
-      if (match[1]) type = "whitespace";
-      else if (match[2]) {
+      // Handle single-line comments (//)
+      if (char === "/" && nextChar === "/") {
+        const start = i;
+        let end = i + 2;
+
+        // Find the end of the line
+        while (end < code.length && code[end] !== "\n") {
+          end++;
+        }
+
+        tokens.push({
+          type: "comment",
+          content: code.substring(start, end),
+          id: `comment-${start}-${end - start}`,
+        });
+
+        i = end;
+        continue;
+      }
+
+      // Handle multi-line comments (/* */)
+      if (char === "/" && nextChar === "*") {
+        const start = i;
+        let end = i + 2;
+
+        // Find the end of the comment
+        while (end < code.length - 1) {
+          if (code[end] === "*" && code[end + 1] === "/") {
+            end += 2;
+            break;
+          }
+          end++;
+        }
+
+        tokens.push({
+          type: "comment",
+          content: code.substring(start, end),
+          id: `comment-${start}-${end - start}`,
+        });
+
+        i = end;
+        continue;
+      }
+
+      // Handle string literals
+      if (char === '"' || char === "'" || char === "`") {
+        const quote = char;
+        const start = i;
+        let end = i + 1;
+
+        // Find the end of the string
+        while (end < code.length) {
+          if (code[end] === quote && code[end - 1] !== "\\") {
+            end++;
+            break;
+          }
+          end++;
+        }
+
+        tokens.push({
+          type: "string",
+          content: code.substring(start, end),
+          id: `string-${start}-${end - start}`,
+        });
+
+        i = end;
+        continue;
+      }
+
+      // Handle whitespace
+      if (/\s/.test(char)) {
+        const start = i;
+        let end = i;
+
+        // Collect consecutive whitespace
+        while (end < code.length && /\s/.test(code[end])) {
+          end++;
+        }
+
+        tokens.push({
+          type: "whitespace",
+          content: code.substring(start, end),
+          id: `whitespace-${start}-${end - start}`,
+        });
+
+        i = end;
+        continue;
+      }
+
+      // Handle numbers
+      if (/[0-9]/.test(char)) {
+        const start = i;
+        let end = i;
+
+        // Collect digits and decimal points
+        while (end < code.length && /[0-9.]/.test(code[end])) {
+          end++;
+        }
+
+        tokens.push({
+          type: "number",
+          content: code.substring(start, end),
+          id: `number-${start}-${end - start}`,
+        });
+
+        i = end;
+        continue;
+      }
+
+      // Handle operators and punctuation
+      if (/[{}[\]();,.:=+\-*/%<>!&|]/.test(char)) {
+        let end = i + 1;
+
+        // Handle multi-character operators
+        const twoChar = code.substring(i, i + 2);
+        const threeChar = code.substring(i, i + 3);
+
+        if (["===", "!==", ">>>", "<<=", ">>="].includes(threeChar)) {
+          end = i + 3;
+        } else if (
+          [
+            "==",
+            "!=",
+            "<=",
+            ">=",
+            "&&",
+            "||",
+            "++",
+            "--",
+            "+=",
+            "-=",
+            "*=",
+            "/=",
+            "%=",
+            "<<",
+            ">>",
+            "=>",
+            "?.",
+          ].includes(twoChar)
+        ) {
+          end = i + 2;
+        }
+
+        tokens.push({
+          type: "operator",
+          content: code.substring(i, end),
+          id: `operator-${i}-${end - i}`,
+        });
+
+        i = end;
+        continue;
+      }
+
+      // Handle identifiers and keywords
+      if (/[a-zA-Z_$]/.test(char)) {
+        const start = i;
+        let end = i;
+
+        // Collect identifier characters
+        while (end < code.length && /[a-zA-Z0-9_$]/.test(code[end])) {
+          end++;
+        }
+
+        const content = code.substring(start, end);
+
         // Check if it's a keyword
         const keywords = [
           "function",
@@ -186,17 +347,54 @@ const tokenizeCode = (code: string, language: string): CodeToken[] => {
           "class",
           "import",
           "export",
+          "default",
+          "async",
+          "await",
+          "try",
+          "catch",
+          "finally",
+          "throw",
+          "new",
+          "this",
+          "super",
+          "extends",
+          "static",
+          "public",
+          "private",
+          "protected",
+          "interface",
+          "type",
+          "true",
+          "false",
+          "null",
+          "undefined",
+          "typeof",
+          "instanceof",
         ];
-        type = keywords.includes(content) ? "keyword" : "text";
-      } else if (match[3]) type = "number";
-      else if (match[4]) type = "operator";
 
+        const type = keywords.includes(content) ? "keyword" : "text";
+
+        tokens.push({
+          type,
+          content,
+          id: `${type}-${start}-${content}`,
+        });
+
+        i = end;
+        continue;
+      }
+
+      // Handle any other character
       tokens.push({
-        type,
-        content,
-        id: `${type}-${startPos}-${content.replace(/\s/g, "_")}`,
+        type: "text",
+        content: char,
+        id: `text-${i}-${char}`,
       });
+
+      i++;
     }
+
+    return tokens;
   }
 
   return tokens;
@@ -213,7 +411,7 @@ const applyManualHighlights = (
   tokens.forEach((token, index) => {
     const tokenStart = currentPos;
     const tokenEnd = currentPos + token.content.length;
-    
+
     // Check if this token overlaps with any highlight range
     const highlightOverlap = highlights.find(
       (highlight) =>
@@ -469,25 +667,48 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
 
     // Use manual highlights if provided, otherwise fall back to automatic diff
     if (useManualHighlightsOnly || manualHighlights.length > 0) {
-      const manualChanges = applyManualHighlights(currentTokens, manualHighlights);
-      
+      const manualChanges = applyManualHighlights(
+        currentTokens,
+        manualHighlights
+      );
+
       console.log("=== MANUAL HIGHLIGHTS DEBUG ===");
       console.log("Manual highlights:", manualHighlights);
-      console.log("Changes:", manualChanges.map(c => `${c.type}: ${c.token.type}:'${c.token.content}' (Manual: ${c.isManuallyHighlighted})`));
-      
+      console.log(
+        "Changes:",
+        manualChanges.map(
+          (c) =>
+            `${c.type}: ${c.token.type}:'${c.token.content}' (Manual: ${c.isManuallyHighlighted})`
+        )
+      );
+
       return manualChanges;
     }
 
     // Automatic diff detection
     const diff = calculateTokenDiff(previousTokens, currentTokens);
-    
+
     console.log("=== AUTO DIFF DEBUG ===");
     console.log("Previous code:", JSON.stringify(previousCode));
     console.log("Current code:", JSON.stringify(currentCode));
-    console.log("Changes:", diff.map(c => `${c.type}: ${c.token.type}:'${c.token.content}' (ID: ${c.token.id})`));
-    
+    console.log(
+      "Changes:",
+      diff.map(
+        (c) =>
+          `${c.type}: ${c.token.type}:'${c.token.content}' (ID: ${c.token.id})`
+      )
+    );
+
     return diff;
-  }, [previousTokens, currentTokens, previousCode, currentCode, isAnimating, manualHighlights, useManualHighlightsOnly]);
+  }, [
+    previousTokens,
+    currentTokens,
+    previousCode,
+    currentCode,
+    isAnimating,
+    manualHighlights,
+    useManualHighlightsOnly,
+  ]);
 
   useEffect(() => {
     if (!isAnimating) {
@@ -572,8 +793,12 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
                   whiteSpace:
                     change.token.type === "whitespace" ? "pre" : "normal",
                   // Add visual indicator for manually highlighted content
-                  backgroundColor: change.isManuallyHighlighted ? "rgba(255, 215, 0, 0.2)" : "transparent",
-                  border: change.isManuallyHighlighted ? "1px solid rgba(255, 215, 0, 0.5)" : "none",
+                  backgroundColor: change.isManuallyHighlighted
+                    ? "rgba(255, 215, 0, 0.2)"
+                    : "transparent",
+                  border: change.isManuallyHighlighted
+                    ? "1px solid rgba(255, 215, 0, 0.5)"
+                    : "none",
                   borderRadius: change.isManuallyHighlighted ? "2px" : "0",
                 }}
                 initial={

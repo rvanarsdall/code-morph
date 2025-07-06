@@ -1,16 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Plus, 
-  Settings,
-  Zap,
-  Code2
-} from 'lucide-react';
-import { AnimatedCodeDisplay } from './components/AnimatedCodeDisplay';
-import { StateEditor } from './components/StateEditor';
-import { StateTimeline } from './components/StateTimeline';
-import { PlaybackControls } from './components/PlaybackControls';
-import { ProjectSelector } from './components/ProjectSelector';
+import React, { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Plus, Settings, Zap, Code2 } from "lucide-react";
+import { AnimatedCodeDisplay } from "./components/AnimatedCodeDisplay";
+import { StateEditor } from "./components/StateEditor";
+import { StateTimeline } from "./components/StateTimeline";
+import { PlaybackControls } from "./components/PlaybackControls";
+import { ProjectSelector } from "./components/ProjectSelector";
+
+interface HighlightRange {
+  start: number;
+  end: number;
+  type: "new" | "changed" | "emphasis";
+}
 
 interface CodeState {
   id: string;
@@ -18,6 +19,8 @@ interface CodeState {
   language: string;
   title: string;
   timestamp: number;
+  manualHighlights?: HighlightRange[];
+  useManualHighlightsOnly?: boolean;
 }
 
 interface Project {
@@ -33,7 +36,7 @@ interface Project {
   };
 }
 
-const STORAGE_KEY = 'code-presentation-projects';
+const STORAGE_KEY = "code-presentation-projects";
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -42,21 +45,22 @@ function App() {
   const [isAnimating, setIsAnimating] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(2500);
   const [showSettings, setShowSettings] = useState(false);
-  
+
   // State Editor
   const [editorState, setEditorState] = useState<{
     isOpen: boolean;
-    mode: 'create' | 'edit';
+    mode: "create" | "edit";
     state?: CodeState;
     index?: number;
   }>({
     isOpen: false,
-    mode: 'create'
+    mode: "create",
   });
 
-  const currentProject = projects.find(p => p.id === currentProjectId);
+  const currentProject = projects.find((p) => p.id === currentProjectId);
   const currentState = currentProject?.states[currentProject.currentStateIndex];
-  const previousState = currentProject?.states[currentProject.currentStateIndex - 1];
+  const previousState =
+    currentProject?.states[currentProject.currentStateIndex - 1];
 
   // Load projects from localStorage
   useEffect(() => {
@@ -69,7 +73,7 @@ function App() {
           setCurrentProjectId(parsedProjects[0].id);
         }
       } catch (error) {
-        console.error('Error loading projects:', error);
+        console.error("Error loading projects:", error);
       }
     }
   }, []);
@@ -88,11 +92,13 @@ function App() {
     const interval = setInterval(() => {
       if (currentProject.currentStateIndex < currentProject.states.length - 1) {
         setIsAnimating(true);
-        setProjects(prev => prev.map(p => 
-          p.id === currentProjectId 
-            ? { ...p, currentStateIndex: p.currentStateIndex + 1 }
-            : p
-        ));
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.id === currentProjectId
+              ? { ...p, currentStateIndex: p.currentStateIndex + 1 }
+              : p
+          )
+        );
       } else {
         setIsPlaying(false);
       }
@@ -108,21 +114,21 @@ function App() {
       states: [],
       currentStateIndex: 0,
       settings: {
-        theme: 'oneDark',
+        theme: "oneDark",
         fontSize: 16,
         lineNumbers: true,
-        animationSpeed: 1000
-      }
+        animationSpeed: 1000,
+      },
     };
-    setProjects(prev => [...prev, newProject]);
+    setProjects((prev) => [...prev, newProject]);
     setCurrentProjectId(newProject.id);
   };
 
   const deleteProject = (projectId: string) => {
     if (projects.length <= 1) return; // Don't delete the last project
-    
-    setProjects(prev => {
-      const filtered = prev.filter(p => p.id !== projectId);
+
+    setProjects((prev) => {
+      const filtered = prev.filter((p) => p.id !== projectId);
       if (projectId === currentProjectId) {
         setCurrentProjectId(filtered[0]?.id || null);
       }
@@ -130,75 +136,90 @@ function App() {
     });
   };
 
-  const handleStateSave = (stateData: Omit<CodeState, 'id' | 'timestamp'>) => {
+  const handleStateSave = (stateData: Omit<CodeState, "id" | "timestamp">) => {
     if (!currentProject) return;
 
-    if (editorState.mode === 'edit' && editorState.state && editorState.index !== undefined) {
+    if (
+      editorState.mode === "edit" &&
+      editorState.state &&
+      editorState.index !== undefined
+    ) {
       // Update existing state
       const updatedState: CodeState = {
         ...editorState.state,
         ...stateData,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
-      setProjects(prev => prev.map(p => 
-        p.id === currentProjectId 
-          ? { 
-              ...p, 
-              states: p.states.map((s, i) => i === editorState.index ? updatedState : s)
-            }
-          : p
-      ));
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === currentProjectId
+            ? {
+                ...p,
+                states: p.states.map((s, i) =>
+                  i === editorState.index ? updatedState : s
+                ),
+              }
+            : p
+        )
+      );
     } else {
       // Create new state
       const newState: CodeState = {
         id: Date.now().toString(),
         ...stateData,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
-      setProjects(prev => prev.map(p => 
-        p.id === currentProjectId 
-          ? { ...p, states: [...p.states, newState] }
-          : p
-      ));
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === currentProjectId
+            ? { ...p, states: [...p.states, newState] }
+            : p
+        )
+      );
     }
 
-    setEditorState({ isOpen: false, mode: 'create' });
+    setEditorState({ isOpen: false, mode: "create" });
   };
 
   const handleStateEdit = (state: CodeState, index: number) => {
     setEditorState({
       isOpen: true,
-      mode: 'edit',
+      mode: "edit",
       state,
-      index
+      index,
     });
   };
 
   const deleteState = (stateId: string) => {
     if (!currentProject) return;
 
-    setProjects(prev => prev.map(p => 
-      p.id === currentProjectId 
-        ? { 
-            ...p, 
-            states: p.states.filter(s => s.id !== stateId),
-            currentStateIndex: Math.max(0, Math.min(p.currentStateIndex, p.states.length - 2))
-          }
-        : p
-    ));
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === currentProjectId
+          ? {
+              ...p,
+              states: p.states.filter((s) => s.id !== stateId),
+              currentStateIndex: Math.max(
+                0,
+                Math.min(p.currentStateIndex, p.states.length - 2)
+              ),
+            }
+          : p
+      )
+    );
   };
 
   const goToState = (index: number) => {
     if (isAnimating || !currentProject) return;
-    
+
     setIsAnimating(true);
-    setProjects(prev => prev.map(p => 
-      p.id === currentProjectId 
-        ? { ...p, currentStateIndex: index }
-        : p
-    ));
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === currentProjectId ? { ...p, currentStateIndex: index } : p
+      )
+    );
   };
 
   const handleAnimationComplete = () => {
@@ -207,13 +228,13 @@ function App() {
 
   const exportProject = () => {
     if (!currentProject) return;
-    
+
     const dataStr = JSON.stringify(currentProject, null, 2);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement('a');
+    const link = document.createElement("a");
     link.href = url;
-    link.download = `${currentProject.name.replace(/\s+/g, '_')}.json`;
+    link.download = `${currentProject.name.replace(/\s+/g, "_")}.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -228,22 +249,24 @@ function App() {
         const imported = JSON.parse(e.target?.result as string);
         const newId = Date.now().toString();
         const newProject = { ...imported, id: newId };
-        setProjects(prev => [...prev, newProject]);
+        setProjects((prev) => [...prev, newProject]);
         setCurrentProjectId(newId);
       } catch (error) {
-        alert('Error importing project file');
+        alert("Error importing project file");
       }
     };
     reader.readAsText(file);
-    event.target.value = ''; // Reset input
+    event.target.value = ""; // Reset input
   };
 
-  const updateProjectSettings = (settings: Partial<Project['settings']>) => {
-    setProjects(prev => prev.map(p => 
-      p.id === currentProjectId 
-        ? { ...p, settings: { ...p.settings, ...settings } }
-        : p
-    ));
+  const updateProjectSettings = (settings: Partial<Project["settings"]>) => {
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === currentProjectId
+          ? { ...p, settings: { ...p.settings, ...settings } }
+          : p
+      )
+    );
   };
 
   // Get the previous state for autofill functionality
@@ -267,8 +290,9 @@ function App() {
                 Code Morph Studio
               </h1>
               <p className="text-gray-300 text-xl max-w-2xl mx-auto leading-relaxed">
-                Create stunning animated code presentations where your code transforms and evolves in real-time. 
-                Perfect for teaching programming concepts with visual impact.
+                Create stunning animated code presentations where your code
+                transforms and evolves in real-time. Perfect for teaching
+                programming concepts with visual impact.
               </p>
             </motion.div>
           </div>
@@ -315,7 +339,7 @@ function App() {
                 <Settings className="w-5 h-5" />
               </button>
               <button
-                onClick={() => setEditorState({ isOpen: true, mode: 'create' })}
+                onClick={() => setEditorState({ isOpen: true, mode: "create" })}
                 className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-4 py-2 rounded-lg font-semibold transition-all flex items-center"
               >
                 <Plus className="w-4 h-4 mr-2" />
@@ -334,17 +358,34 @@ function App() {
               <Code2 className="w-6 h-6 mr-2 text-yellow-400" />
               Live Code Animation
             </h2>
-            
+
             <PlaybackControls
               isPlaying={isPlaying}
               onPlayPause={() => setIsPlaying(!isPlaying)}
-              onPrevious={() => goToState(Math.max(0, (currentProject?.currentStateIndex || 0) - 1))}
-              onNext={() => goToState(Math.min((currentProject?.states.length || 1) - 1, (currentProject?.currentStateIndex || 0) + 1))}
+              onPrevious={() =>
+                goToState(
+                  Math.max(0, (currentProject?.currentStateIndex || 0) - 1)
+                )
+              }
+              onNext={() =>
+                goToState(
+                  Math.min(
+                    (currentProject?.states.length || 1) - 1,
+                    (currentProject?.currentStateIndex || 0) + 1
+                  )
+                )
+              }
               onSpeedChange={setPlaybackSpeed}
               playbackSpeed={playbackSpeed}
               canPlay={!!currentProject && currentProject.states.length > 0}
-              canGoBack={!!currentProject && currentProject.currentStateIndex > 0}
-              canGoForward={!!currentProject && currentProject.currentStateIndex < currentProject.states.length - 1}
+              canGoBack={
+                !!currentProject && currentProject.currentStateIndex > 0
+              }
+              canGoForward={
+                !!currentProject &&
+                currentProject.currentStateIndex <
+                  currentProject.states.length - 1
+              }
               isAnimating={isAnimating}
             />
           </div>
@@ -356,21 +397,28 @@ function App() {
                 <div className="px-6 py-3 bg-gray-800/60 text-sm text-gray-300 border-b border-gray-700 flex items-center justify-between">
                   <span>{currentState.title}</span>
                   <div className="flex items-center space-x-4">
-                    <span className="text-yellow-400 font-semibold">{currentState.language.toUpperCase()}</span>
+                    <span className="text-yellow-400 font-semibold">
+                      {currentState.language.toUpperCase()}
+                    </span>
                     <span className="text-xs text-gray-500">
-                      {currentProject!.currentStateIndex + 1} / {currentProject!.states.length}
+                      {currentProject!.currentStateIndex + 1} /{" "}
+                      {currentProject!.states.length}
                     </span>
                   </div>
                 </div>
                 <div className="p-6">
                   <AnimatedCodeDisplay
                     currentCode={currentState.code}
-                    previousCode={previousState?.code || ''}
+                    previousCode={previousState?.code || ""}
                     language={currentState.language}
                     fontSize={currentProject!.settings.fontSize}
                     showLineNumbers={currentProject!.settings.lineNumbers}
                     isAnimating={isAnimating}
                     onAnimationComplete={handleAnimationComplete}
+                    manualHighlights={currentState.manualHighlights}
+                    useManualHighlightsOnly={
+                      currentState.useManualHighlightsOnly
+                    }
                   />
                 </div>
               </>
@@ -378,8 +426,12 @@ function App() {
               <div className="absolute inset-0 flex items-center justify-center text-gray-500">
                 <div className="text-center">
                   <Zap className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                  <p className="text-lg">Ready to create your first code animation!</p>
-                  <p className="text-sm mt-2">Click "Add State" to get started</p>
+                  <p className="text-lg">
+                    Ready to create your first code animation!
+                  </p>
+                  <p className="text-sm mt-2">
+                    Click "Add State" to get started
+                  </p>
                 </div>
               </div>
             )}
@@ -390,31 +442,45 @@ function App() {
             {showSettings && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
+                animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 className="mt-6 pt-6 border-t border-gray-700"
               >
-                <h3 className="text-lg font-semibold text-white mb-4">Display Settings</h3>
+                <h3 className="text-lg font-semibold text-white mb-4">
+                  Display Settings
+                </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">Font Size</label>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Font Size
+                    </label>
                     <input
                       type="range"
                       min="12"
                       max="24"
                       value={currentProject?.settings.fontSize}
-                      onChange={(e) => updateProjectSettings({ fontSize: parseInt(e.target.value) })}
+                      onChange={(e) =>
+                        updateProjectSettings({
+                          fontSize: parseInt(e.target.value),
+                        })
+                      }
                       className="w-full accent-yellow-500"
                     />
-                    <span className="text-sm text-gray-400">{currentProject?.settings.fontSize}px</span>
+                    <span className="text-sm text-gray-400">
+                      {currentProject?.settings.fontSize}px
+                    </span>
                   </div>
-                  
+
                   <div>
                     <label className="flex items-center text-sm font-medium text-gray-300">
                       <input
                         type="checkbox"
                         checked={currentProject?.settings.lineNumbers}
-                        onChange={(e) => updateProjectSettings({ lineNumbers: e.target.checked })}
+                        onChange={(e) =>
+                          updateProjectSettings({
+                            lineNumbers: e.target.checked,
+                          })
+                        }
                         className="mr-2 accent-yellow-500"
                       />
                       Show line numbers
@@ -446,10 +512,14 @@ function App() {
         {editorState.isOpen && (
           <StateEditor
             state={editorState.state}
-            previousState={editorState.mode === 'create' ? getPreviousStateForEditor() : undefined}
+            previousState={
+              editorState.mode === "create"
+                ? getPreviousStateForEditor()
+                : undefined
+            }
             isOpen={editorState.isOpen}
             onSave={handleStateSave}
-            onCancel={() => setEditorState({ isOpen: false, mode: 'create' })}
+            onCancel={() => setEditorState({ isOpen: false, mode: "create" })}
             mode={editorState.mode}
           />
         )}
