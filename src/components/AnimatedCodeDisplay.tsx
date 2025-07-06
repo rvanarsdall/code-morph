@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Copy, Check } from "lucide-react";
 
 // Animation timing constants - adjust these to fine-tune the animation speed
 const ANIMATION_TIMINGS = {
@@ -69,11 +70,11 @@ const detectLanguage = (code: string): string => {
   if (/\b(function|const|let|var|=>)\b/.test(code)) return "javascript";
   if (/\b(def|import|class|if __name__)\b/.test(code)) return "python";
   if (/\{[^}]*:[^}]*\}/.test(code)) return "css";
-  if (/^\s*[\{\[]/.test(code.trim())) return "json";
+  if (/^\s*[{[]/.test(code.trim())) return "json";
   return "html"; // default
 };
 
-// Enhanced tokenizer that preserves exact content structure
+// Enhanced tokenizer that preserves exact content structure and spacing
 const tokenizeCode = (code: string, language: string): CodeToken[] => {
   const tokens: CodeToken[] = [];
 
@@ -160,7 +161,7 @@ const tokenizeCode = (code: string, language: string): CodeToken[] => {
       }
     }
   } else {
-    // Enhanced JavaScript tokenizer with comment support
+    // Enhanced JavaScript tokenizer with comment support and better spacing
     const tokens: CodeToken[] = [];
     let i = 0;
 
@@ -237,7 +238,7 @@ const tokenizeCode = (code: string, language: string): CodeToken[] => {
         continue;
       }
 
-      // Handle whitespace
+      // Handle whitespace - preserve exact whitespace
       if (/\s/.test(char)) {
         const start = i;
         let end = i;
@@ -641,6 +642,7 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
   const [animationPhase, setAnimationPhase] = useState<
     "idle" | "positioning" | "adding" | "complete"
   >("idle");
+  const [copySuccess, setCopySuccess] = useState(false);
 
   // Auto-detect language if not provided or if it's the default
   const detectedLanguage = useMemo(() => {
@@ -720,6 +722,38 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
     useManualHighlightsOnly,
   ]);
 
+  // Handle copying code to clipboard
+  const handleCopy = async () => {
+    try {
+      // Reconstruct the original code from the currently visible tokens
+      // This ensures we copy exactly what's displayed, preserving original formatting
+      const visibleChanges = changes.filter((change) => {
+        if (change.type === "remove") return false;
+        if (change.type === "add" && animationPhase === "positioning") return false;
+        return true;
+      });
+      
+      // Reconstruct the code by joining token contents directly
+      const reconstructedCode = visibleChanges
+        .map(change => change.token.content)
+        .join('');
+      
+      await navigator.clipboard.writeText(reconstructedCode);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy code:", err);
+      // Fallback to copying currentCode if reconstruction fails
+      try {
+        await navigator.clipboard.writeText(currentCode);
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      } catch (fallbackErr) {
+        console.error("Fallback copy also failed:", fallbackErr);
+      }
+    }
+  };
+
   useEffect(() => {
     if (!isAnimating) {
       setAnimationPhase("idle");
@@ -742,10 +776,6 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
 
   // Group tokens by lines for proper rendering
   const renderTokens = () => {
-    const lines: { tokens: CodeChange[]; lineNumber: number }[] = [];
-    let currentLine: CodeChange[] = [];
-    let lineNumber = 1;
-
     // Filter changes based on animation phase
     const visibleChanges = changes.filter((change) => {
       if (change.type === "remove") return false;
@@ -754,18 +784,28 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
       return true;
     });
 
+    // Split tokens into lines for line number display
+    const lines: { tokens: CodeChange[]; lineNumber: number }[] = [];
+    let currentLine: CodeChange[] = [];
+    let lineNumber = 1;
+
     visibleChanges.forEach((change) => {
       if (change.token.content.includes("\n")) {
-        // Split on newlines
+        // Split on newlines and handle each part
         const parts = change.token.content.split("\n");
         parts.forEach((part, index) => {
-          if (part) {
+          if (part || index === 0) { // Include empty parts only at start of split
             currentLine.push({
               ...change,
               token: { ...change.token, content: part },
             });
           }
           if (index < parts.length - 1) {
+            // End of line - add newline token and finalize line
+            currentLine.push({
+              ...change,
+              token: { ...change.token, content: "\n", type: "whitespace" },
+            });
             lines.push({ tokens: [...currentLine], lineNumber });
             currentLine = [];
             lineNumber++;
@@ -780,82 +820,105 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
       lines.push({ tokens: currentLine, lineNumber });
     }
 
-    return lines.map(({ tokens, lineNumber: lineNum }) => (
-      <div key={lineNum} className="flex items-start min-h-[1.5em]">
-        {showLineNumbers && (
-          <div
-            className="text-gray-500 text-right pr-4 select-none flex-shrink-0"
-            style={{ minWidth: "3em", fontSize: `${fontSize}px` }}
-          >
-            {lineNum}
-          </div>
-        )}
-        <div className="flex flex-wrap items-center flex-1">
-          <AnimatePresence mode="popLayout">
-            {tokens.map((change, index) => (
-              <motion.span
-                key={change.token.id}
-                className="inline-block"
-                style={{
-                  fontSize: `${fontSize}px`,
-                  fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
-                  color: getTokenColor(change.token),
-                  whiteSpace:
-                    change.token.type === "whitespace" ? "pre" : "normal",
-                  // Add visual indicator for manually highlighted content
-                  backgroundColor: change.isManuallyHighlighted
-                    ? "rgba(255, 215, 0, 0.2)"
-                    : "transparent",
-                  border: change.isManuallyHighlighted
-                    ? "1px solid rgba(255, 215, 0, 0.5)"
-                    : "none",
-                  borderRadius: change.isManuallyHighlighted ? "2px" : "0",
-                }}
-                initial={
-                  change.type === "add" && isAnimating
-                    ? { opacity: 0, scale: 0.8, y: -10 }
-                    : { opacity: 1, scale: 1 }
-                }
-                animate={{
-                  opacity: 1,
-                  scale: 1,
-                  y: 0,
-                  x: 0,
-                }}
-                exit={{
-                  opacity: 0,
-                  scale: 0.8,
-                  y: 10,
-                }}
-                transition={{
-                  duration:
-                    change.type === "add" && isAnimating
-                      ? ANIMATION_TIMINGS.NEW_ELEMENT_DURATION
-                      : ANIMATION_TIMINGS.EXISTING_ELEMENT_DURATION,
-                  ease:
-                    change.type === "add" && isAnimating
-                      ? ANIMATION_TIMINGS.NEW_ELEMENT_EASING
-                      : ANIMATION_TIMINGS.EXISTING_ELEMENT_EASING,
-                  delay:
-                    change.type === "add" && isAnimating
-                      ? index * ANIMATION_TIMINGS.NEW_ELEMENT_STAGGER_DELAY
-                      : 0,
-                }}
-                layout={isAnimating}
-                layoutId={isAnimating ? change.token.id : undefined}
+    return (
+      <div className="font-mono" style={{ fontSize: `${fontSize}px` }}>
+        {lines.map(({ tokens, lineNumber: lineNum }) => (
+          <div key={lineNum} className="flex">
+            {showLineNumbers && (
+              <div
+                className="text-gray-500 text-right pr-4 select-none flex-shrink-0"
+                style={{ minWidth: "3em", fontSize: `${fontSize}px` }}
               >
-                {change.token.content}
-              </motion.span>
-            ))}
-          </AnimatePresence>
-        </div>
+                {lineNum}
+              </div>
+            )}
+            <pre className="flex-1 m-0 p-0 overflow-visible whitespace-pre-wrap font-mono">
+              <AnimatePresence mode="popLayout">
+                {tokens.map((change, index) => (
+                  <motion.span
+                    key={change.token.id}
+                    className="inline"
+                    style={{
+                      color: getTokenColor(change.token),
+                      backgroundColor: change.isManuallyHighlighted
+                        ? "rgba(255, 215, 0, 0.2)"
+                        : "transparent",
+                      border: change.isManuallyHighlighted
+                        ? "1px solid rgba(255, 215, 0, 0.5)"
+                        : "none",
+                      borderRadius: change.isManuallyHighlighted ? "2px" : "0",
+                    }}
+                    initial={
+                      change.type === "add" && isAnimating
+                        ? { opacity: 0, scale: 0.8, y: -10 }
+                        : { opacity: 1, scale: 1 }
+                    }
+                    animate={{
+                      opacity: 1,
+                      scale: 1,
+                      y: 0,
+                      x: 0,
+                    }}
+                    exit={{
+                      opacity: 0,
+                      scale: 0.8,
+                      y: 10,
+                    }}
+                    transition={{
+                      duration:
+                        change.type === "add" && isAnimating
+                          ? ANIMATION_TIMINGS.NEW_ELEMENT_DURATION
+                          : ANIMATION_TIMINGS.EXISTING_ELEMENT_DURATION,
+                      ease:
+                        change.type === "add" && isAnimating
+                          ? ANIMATION_TIMINGS.NEW_ELEMENT_EASING
+                          : ANIMATION_TIMINGS.EXISTING_ELEMENT_EASING,
+                      delay:
+                        change.type === "add" && isAnimating
+                          ? index * ANIMATION_TIMINGS.NEW_ELEMENT_STAGGER_DELAY
+                          : 0,
+                    }}
+                    layout={isAnimating}
+                    layoutId={isAnimating ? change.token.id : undefined}
+                  >
+                    {change.token.content}
+                  </motion.span>
+                ))}
+              </AnimatePresence>
+            </pre>
+          </div>
+        ))}
       </div>
-    ));
+    );
   };
 
   return (
-    <div className="bg-gray-900 rounded-lg overflow-hidden p-6 font-mono leading-relaxed">
-      <div className="space-y-1">{renderTokens()}</div>
+    <div className="bg-gray-900 rounded-lg overflow-hidden font-mono leading-relaxed relative">
+      {/* Copy button */}
+      <div className="absolute top-4 right-4 z-10">
+        <button
+          onClick={handleCopy}
+          className="flex items-center space-x-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded transition-colors text-sm"
+          title="Copy code to clipboard"
+        >
+          {copySuccess ? (
+            <>
+              <Check className="w-4 h-4 text-green-400" />
+              <span className="text-green-400">Copied!</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-4 h-4" />
+              <span>Copy</span>
+            </>
+          )}
+        </button>
+      </div>
+      
+      {/* Code display */}
+      <div className="p-6 pt-12">
+        {renderTokens()}
+      </div>
     </div>
   );
 };
