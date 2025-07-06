@@ -657,7 +657,17 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
   );
 
   const changes = useMemo(() => {
-    if (!previousCode || !isAnimating) {
+    if (!previousCode) {
+      // No previous code, so all tokens are static (no animation)
+      return currentTokens.map((token, index) => ({
+        type: "keep" as const,
+        token,
+        newIndex: index,
+      }));
+    }
+
+    if (!isAnimating) {
+      // Animation is complete or not started, show all tokens as static
       return currentTokens.map((token, index) => ({
         type: "keep" as const,
         token,
@@ -784,7 +794,7 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
           <AnimatePresence mode="popLayout">
             {tokens.map((change, index) => (
               <motion.span
-                key={`${change.token.id}-${change.type}`}
+                key={change.token.id}
                 className="inline-block"
                 style={{
                   fontSize: `${fontSize}px`,
@@ -802,7 +812,7 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
                   borderRadius: change.isManuallyHighlighted ? "2px" : "0",
                 }}
                 initial={
-                  change.type === "add"
+                  change.type === "add" && isAnimating
                     ? { opacity: 0, scale: 0.8, y: -10 }
                     : { opacity: 1, scale: 1 }
                 }
@@ -819,20 +829,20 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
                 }}
                 transition={{
                   duration:
-                    change.type === "add"
+                    change.type === "add" && isAnimating
                       ? ANIMATION_TIMINGS.NEW_ELEMENT_DURATION
                       : ANIMATION_TIMINGS.EXISTING_ELEMENT_DURATION,
                   ease:
-                    change.type === "add"
+                    change.type === "add" && isAnimating
                       ? ANIMATION_TIMINGS.NEW_ELEMENT_EASING
                       : ANIMATION_TIMINGS.EXISTING_ELEMENT_EASING,
                   delay:
-                    change.type === "add"
+                    change.type === "add" && isAnimating
                       ? index * ANIMATION_TIMINGS.NEW_ELEMENT_STAGGER_DELAY
                       : 0,
                 }}
-                layout
-                layoutId={change.token.id}
+                layout={isAnimating}
+                layoutId={isAnimating ? change.token.id : undefined}
               >
                 {change.token.content}
               </motion.span>
