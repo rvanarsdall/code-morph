@@ -96,46 +96,89 @@ const formatHTML = (html: string): string => {
   // Remove extra whitespace and normalize
   const normalized = html.replace(/>\s+</g, '><').trim();
   
-  // Simple tokenization that preserves structure
-  const tokens = normalized.split(/(<[^>]*>)/);
+  // Better tokenization that keeps content with opening tags when appropriate
+  const tokens = [];
+  let currentPos = 0;
   
-  tokens.forEach(token => {
-    if (token.trim()) {
-      if (token.startsWith('</')) {
+  // Find all tags
+  const tagRegex = /<[^>]*>/g;
+  let match;
+  
+  while ((match = tagRegex.exec(normalized)) !== null) {
+    // Add text before the tag
+    if (match.index > currentPos) {
+      const textBefore = normalized.substring(currentPos, match.index);
+      if (textBefore.trim()) {
+        tokens.push({ type: 'text', content: textBefore.trim() });
+      }
+    }
+    
+    // Add the tag
+    tokens.push({ type: 'tag', content: match[0] });
+    currentPos = match.index + match[0].length;
+  }
+  
+  // Add remaining text
+  if (currentPos < normalized.length) {
+    const remaining = normalized.substring(currentPos).trim();
+    if (remaining) {
+      tokens.push({ type: 'text', content: remaining });
+    }
+  }
+  
+  // Format the tokens
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const nextToken = tokens[i + 1];
+    const prevToken = tokens[i - 1];
+    
+    if (token.type === 'tag') {
+      const tagContent = token.content;
+      
+      if (tagContent.startsWith('</')) {
         // Closing tag
         indent = Math.max(0, indent - 1);
-        if (formatted && !formatted.endsWith('\n')) {
-          formatted += '\n';
+        
+        // If previous token was text, put closing tag on same line
+        if (prevToken && prevToken.type === 'text') {
+          formatted += tagContent;
+        } else {
+          if (formatted && !formatted.endsWith('\n')) {
+            formatted += '\n';
+          }
+          formatted += tab.repeat(indent) + tagContent;
         }
-        formatted += tab.repeat(indent) + token;
-      } else if (token.startsWith('<') && !token.endsWith('/>')) {
-        // Opening tag
-        if (formatted && !formatted.endsWith('\n')) {
-          formatted += '\n';
-        }
-        formatted += tab.repeat(indent) + token;
-        // Only increase indent for non-self-closing tags
-        if (!token.match(/<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)/i)) {
-          indent++;
-        }
-      } else if (token.startsWith('<') && token.endsWith('/>')) {
+      } else if (tagContent.endsWith('/>')) {
         // Self-closing tag
         if (formatted && !formatted.endsWith('\n')) {
           formatted += '\n';
         }
-        formatted += tab.repeat(indent) + token;
+        formatted += tab.repeat(indent) + tagContent;
       } else {
-        // Text content
-        const trimmed = token.trim();
-        if (trimmed) {
-          if (formatted && !formatted.endsWith('\n') && !formatted.endsWith('>')) {
-            formatted += '\n';
+        // Opening tag
+        if (formatted && !formatted.endsWith('\n')) {
+          formatted += '\n';
+        }
+        formatted += tab.repeat(indent) + tagContent;
+        
+        // If next token is text, put it on the same line
+        if (nextToken && nextToken.type === 'text') {
+          formatted += nextToken.content;
+          i++; // Skip the next token since we've already processed it
+        } else {
+          // Only increase indent for tags that will have content on new lines
+          if (!tagContent.match(/<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)/i)) {
+            indent++;
           }
-          formatted += tab.repeat(indent) + trimmed;
         }
       }
+    } else {
+      // Text content - should already be handled with opening tags
+      if (prevToken && prevToken.type !== 'tag') {
+        formatted += token.content;
+      }
     }
-  });
+  }
   
   return formatted.trim();
 };

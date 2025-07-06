@@ -1,17 +1,52 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useEffect, useState, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+
+// Animation timing constants - adjust these to fine-tune the animation speed
+const ANIMATION_TIMINGS = {
+  // Phase durations (in milliseconds)
+  POSITIONING_PHASE_DURATION: 600, // How long existing elements take to move into position
+  ADDING_PHASE_DURATION: 2500, // How long new elements take to appear
+
+  // Individual element animation durations (in seconds)
+  EXISTING_ELEMENT_DURATION: 0.4, // How long existing elements take to animate
+  NEW_ELEMENT_DURATION: 0.8, // How long new elements take to fade/scale in
+
+  // Stagger delays (in seconds)
+  NEW_ELEMENT_STAGGER_DELAY: 0.08, // Delay between each new element appearing
+
+  // Easing functions
+  EXISTING_ELEMENT_EASING: "easeInOut" as const, // Smooth for existing elements
+  NEW_ELEMENT_EASING: "easeOut" as const, // More dramatic for new elements
+};
 
 interface CodeToken {
-  type: 'tag' | 'text' | 'attribute' | 'string' | 'keyword' | 'operator' | 'punctuation' | 'number' | 'comment' | 'whitespace';
+  type:
+    | "tag"
+    | "text"
+    | "attribute"
+    | "string"
+    | "keyword"
+    | "operator"
+    | "punctuation"
+    | "number"
+    | "comment"
+    | "whitespace";
   content: string;
   id: string;
 }
 
 interface CodeChange {
-  type: 'add' | 'remove' | 'keep' | 'move';
+  type: "add" | "remove" | "keep" | "move";
   token: CodeToken;
   oldIndex?: number;
   newIndex: number;
+  isManuallyHighlighted?: boolean; // Track if this was manually highlighted
+}
+
+interface HighlightRange {
+  start: number;
+  end: number;
+  type: "new" | "changed" | "emphasis";
 }
 
 interface AnimatedCodeDisplayProps {
@@ -22,176 +57,375 @@ interface AnimatedCodeDisplayProps {
   showLineNumbers: boolean;
   isAnimating: boolean;
   onAnimationComplete: () => void;
+  // New optional prop for manual highlighting
+  manualHighlights?: HighlightRange[];
+  // Option to disable automatic diff and use only manual highlights
+  useManualHighlightsOnly?: boolean;
 }
 
 // Auto-detect language from code content
 const detectLanguage = (code: string): string => {
-  if (/<[^>]+>/.test(code)) return 'html';
-  if (/\b(function|const|let|var|=>)\b/.test(code)) return 'javascript';
-  if (/\b(def|import|class|if __name__)\b/.test(code)) return 'python';
-  if (/\{[^}]*:[^}]*\}/.test(code)) return 'css';
-  if (/^\s*[\{\[]/.test(code.trim())) return 'json';
-  return 'html'; // default
+  if (/<[^>]+>/.test(code)) return "html";
+  if (/\b(function|const|let|var|=>)\b/.test(code)) return "javascript";
+  if (/\b(def|import|class|if __name__)\b/.test(code)) return "python";
+  if (/\{[^}]*:[^}]*\}/.test(code)) return "css";
+  if (/^\s*[\{\[]/.test(code.trim())) return "json";
+  return "html"; // default
 };
 
 // Enhanced tokenizer that preserves exact content structure
 const tokenizeCode = (code: string, language: string): CodeToken[] => {
   const tokens: CodeToken[] = [];
-  let index = 0;
 
-  if (language === 'html') {
-    // More precise HTML tokenization that preserves structure
+  if (language === "html") {
+    // More precise HTML tokenization that handles tags and attributes separately
     const htmlRegex = /(<\/?[a-zA-Z][^>]*>)|(\s+)|([^<\s]+)/g;
     let match;
-    
+
     while ((match = htmlRegex.exec(code)) !== null) {
       const content = match[0];
-      let type: CodeToken['type'] = 'text';
-      
+      const startPos = match.index; // Use actual position in code for uniqueness
+
       if (match[1]) {
-        // HTML tag - create unique ID based on tag name and position
-        type = 'tag';
+        // HTML tag - parse it for attributes but keep closing > with the tag
+        const tagContent = content;
+        const tagRegex =
+          /(<\/?[a-zA-Z][a-zA-Z0-9]*)|(\s+)|([a-zA-Z-]+)(=)("[^"]*"|'[^']*'|[^\s>]+)?|(>)/g;
+        let tagMatch;
+        let lastIndex = 0;
+        let subIndex = 0;
+
+        while ((tagMatch = tagRegex.exec(tagContent)) !== null) {
+          const part = tagMatch[0];
+          let type: CodeToken["type"] = "tag";
+
+          if (tagMatch[1]) {
+            // Tag name (e.g., <h1, </h1)
+            type = "tag";
+          } else if (tagMatch[2]) {
+            // Whitespace within tag
+            type = "whitespace";
+          } else if (tagMatch[3]) {
+            // Attribute name (class, id, etc.)
+            type = "attribute";
+          } else if (tagMatch[4]) {
+            // Equals sign
+            type = "operator";
+          } else if (tagMatch[5]) {
+            // Attribute value
+            type = "string";
+          } else if (tagMatch[6]) {
+            // Closing >
+            type = "tag";
+          }
+
+          if (part) {
+            tokens.push({
+              type,
+              content: part,
+              // Create stable ID based on position in source code and content
+              id: `${type}-${startPos}-${subIndex}-${part.replace(/[<>/\s"'=]/g, "_").substring(0, 10)}`,
+            });
+            subIndex++;
+          }
+
+          lastIndex = tagMatch.index + tagMatch[0].length;
+        }
+
+        // Handle any remaining content (though there shouldn't be any with the improved regex)
+        if (lastIndex < tagContent.length) {
+          const remaining = tagContent.substring(lastIndex);
+          if (remaining) {
+            tokens.push({
+              type: "tag",
+              content: remaining,
+              id: `tag-${startPos}-${subIndex}-${remaining.replace(/[<>/\s"'=]/g, "_").substring(0, 10)}`,
+            });
+          }
+        }
       } else if (match[2]) {
         // Whitespace
-        type = 'whitespace';
+        tokens.push({
+          type: "whitespace",
+          content: content,
+          id: `whitespace-${startPos}-${content.length}`,
+        });
       } else {
-        // Regular text
-        type = 'text';
+        // Regular text content
+        tokens.push({
+          type: "text",
+          content: content,
+          id: `text-${startPos}-${content.replace(/\s/g, "_").substring(0, 10)}`,
+        });
       }
-      
-      tokens.push({
-        type,
-        content,
-        id: `${type}-${index}-${content.replace(/[<>\/\s]/g, '_').substring(0, 20)}`
-      });
-      index++;
     }
   } else {
     // For other languages, split by words and operators
-    const generalRegex = /(\s+)|([a-zA-Z_][a-zA-Z0-9_]*)|([0-9]+\.?[0-9]*)|([{}[\]();,.:=+\-*/%<>!&|]+)|(.)/g;
+    const generalRegex =
+      /(\s+)|([a-zA-Z_][a-zA-Z0-9_]*)|([0-9]+\.?[0-9]*)|([{}[\]();,.:=+\-*/%<>!&|]+)|(.)/g;
     let match;
-    
+
     while ((match = generalRegex.exec(code)) !== null) {
       const content = match[0];
-      let type: CodeToken['type'] = 'text';
-      
-      if (match[1]) type = 'whitespace';
+      const startPos = match.index;
+      let type: CodeToken["type"] = "text";
+
+      if (match[1]) type = "whitespace";
       else if (match[2]) {
         // Check if it's a keyword
-        const keywords = ['function', 'const', 'let', 'var', 'if', 'else', 'for', 'while', 'return', 'class', 'import', 'export'];
-        type = keywords.includes(content) ? 'keyword' : 'text';
-      }
-      else if (match[3]) type = 'number';
-      else if (match[4]) type = 'operator';
-      
+        const keywords = [
+          "function",
+          "const",
+          "let",
+          "var",
+          "if",
+          "else",
+          "for",
+          "while",
+          "return",
+          "class",
+          "import",
+          "export",
+        ];
+        type = keywords.includes(content) ? "keyword" : "text";
+      } else if (match[3]) type = "number";
+      else if (match[4]) type = "operator";
+
       tokens.push({
         type,
         content,
-        id: `${type}-${index}-${content.replace(/\s/g, '_')}`
+        id: `${type}-${startPos}-${content.replace(/\s/g, "_")}`,
       });
-      index++;
     }
   }
-  
+
   return tokens;
 };
 
-// Improved diff algorithm that better handles content-based matching
-const calculateTokenDiff = (oldTokens: CodeToken[], newTokens: CodeToken[]): CodeChange[] => {
+// Apply manual highlights to override automatic diff detection
+const applyManualHighlights = (
+  tokens: CodeToken[],
+  highlights: HighlightRange[]
+): CodeChange[] => {
   const changes: CodeChange[] = [];
-  
-  // Create a more sophisticated matching system
-  const createTokenSignature = (token: CodeToken) => `${token.type}:${token.content}`;
-  
-  // Build maps for exact content matches
-  const oldContentMap = new Map<string, number[]>();
-  const newContentMap = new Map<string, number[]>();
-  
-  oldTokens.forEach((token, index) => {
-    const sig = createTokenSignature(token);
-    if (!oldContentMap.has(sig)) oldContentMap.set(sig, []);
-    oldContentMap.get(sig)!.push(index);
-  });
-  
-  newTokens.forEach((token, index) => {
-    const sig = createTokenSignature(token);
-    if (!newContentMap.has(sig)) newContentMap.set(sig, []);
-    newContentMap.get(sig)!.push(index);
-  });
-  
-  const usedOldIndices = new Set<number>();
-  const usedNewIndices = new Set<number>();
-  
-  // First pass: Find exact matches and prefer keeping them in place
-  newTokens.forEach((newToken, newIndex) => {
-    const sig = createTokenSignature(newToken);
-    const oldIndices = oldContentMap.get(sig) || [];
+  let currentPos = 0;
+
+  tokens.forEach((token, index) => {
+    const tokenStart = currentPos;
+    const tokenEnd = currentPos + token.content.length;
     
-    // Find the best matching old index (prefer same position or closest)
-    const availableOldIndices = oldIndices.filter(i => !usedOldIndices.has(i));
-    
-    if (availableOldIndices.length > 0) {
-      // Prefer the old index that's closest to the new position
-      const bestOldIndex = availableOldIndices.reduce((best, current) => {
-        const bestDistance = Math.abs(best - newIndex);
-        const currentDistance = Math.abs(current - newIndex);
-        return currentDistance < bestDistance ? current : best;
-      });
-      
-      changes.push({
-        type: bestOldIndex === newIndex ? 'keep' : 'move',
-        token: newToken,
-        oldIndex: bestOldIndex,
-        newIndex
-      });
-      
-      usedOldIndices.add(bestOldIndex);
-      usedNewIndices.add(newIndex);
-    }
+    // Check if this token overlaps with any highlight range
+    const highlightOverlap = highlights.find(
+      (highlight) =>
+        (highlight.start >= tokenStart && highlight.start < tokenEnd) ||
+        (highlight.end > tokenStart && highlight.end <= tokenEnd) ||
+        (highlight.start <= tokenStart && highlight.end >= tokenEnd)
+    );
+
+    changes.push({
+      type: highlightOverlap ? "add" : "keep",
+      token,
+      newIndex: index,
+      isManuallyHighlighted: !!highlightOverlap,
+    });
+
+    currentPos = tokenEnd;
   });
-  
-  // Second pass: Handle additions
-  newTokens.forEach((newToken, newIndex) => {
-    if (!usedNewIndices.has(newIndex)) {
-      changes.push({
-        type: 'add',
-        token: newToken,
-        newIndex
-      });
-    }
-  });
-  
-  // Third pass: Handle removals
-  oldTokens.forEach((oldToken, oldIndex) => {
-    if (!usedOldIndices.has(oldIndex)) {
-      changes.push({
-        type: 'remove',
-        token: oldToken,
-        oldIndex,
-        newIndex: -1
-      });
-    }
-  });
-  
-  // Sort by new index for proper rendering order
-  return changes.sort((a, b) => {
-    if (a.type === 'remove' && b.type !== 'remove') return 1;
-    if (b.type === 'remove' && a.type !== 'remove') return -1;
-    return a.newIndex - b.newIndex;
-  });
+
+  return changes;
 };
+
+// Improved diff algorithm using Longest Common Subsequence (LCS)
+const calculateTokenDiff = (
+  oldTokens: CodeToken[],
+  newTokens: CodeToken[]
+): CodeChange[] => {
+  const changes: CodeChange[] = [];
+
+  // Use simplified LCS algorithm
+  const lcs = findLongestCommonSubsequence(oldTokens, newTokens);
+
+  // Build the changes array based on LCS
+  let newIndex = 0;
+  let lcsIndex = 0;
+
+  while (newIndex < newTokens.length) {
+    // Check if current new token is in the LCS
+    if (lcsIndex < lcs.length && newIndex === lcs[lcsIndex].newIndex) {
+      // This token should be kept - find its position in old tokens
+      const lcsItem = lcs[lcsIndex];
+      const oldToken = oldTokens[lcsItem.oldIndex];
+
+      changes.push({
+        type: "keep",
+        token: {
+          ...newTokens[newIndex],
+          // Use the old token's ID to maintain consistency for Framer Motion
+          id: oldToken.id,
+        },
+        oldIndex: lcsItem.oldIndex,
+        newIndex: newIndex,
+      });
+
+      lcsIndex++;
+    } else {
+      // This is a new token
+      changes.push({
+        type: "add",
+        token: newTokens[newIndex],
+        newIndex: newIndex,
+      });
+    }
+
+    newIndex++;
+  }
+
+  return changes;
+};
+
+// Find Longest Common Subsequence between old and new tokens
+function findLongestCommonSubsequence(
+  oldTokens: CodeToken[],
+  newTokens: CodeToken[]
+): Array<{ oldIndex: number; newIndex: number }> {
+  const createContentSignature = (token: CodeToken) =>
+    `${token.type}:${token.content}`;
+
+  // Use a more sophisticated approach that considers local context
+  // This prevents matching tokens that are too far apart or in different contexts
+
+  const result: Array<{ oldIndex: number; newIndex: number }> = [];
+  const usedOldIndices = new Set<number>();
+
+  // First pass: Find exact sequential matches from the beginning
+  let oldIdx = 0;
+  let newIdx = 0;
+
+  // Match tokens sequentially from the start
+  while (oldIdx < oldTokens.length && newIdx < newTokens.length) {
+    const oldSig = createContentSignature(oldTokens[oldIdx]);
+    const newSig = createContentSignature(newTokens[newIdx]);
+
+    if (oldSig === newSig) {
+      result.push({ oldIndex: oldIdx, newIndex: newIdx });
+      usedOldIndices.add(oldIdx);
+      oldIdx++;
+      newIdx++;
+    } else {
+      // Don't advance both indices automatically for whitespace differences
+      // This was causing the '}' to not be matched properly
+      // Instead, only advance the new index to look for insertions
+      newIdx++;
+
+      // If we've exhausted new tokens but still have old tokens,
+      // try to find the remaining old tokens later in the new sequence
+      if (newIdx >= newTokens.length && oldIdx < oldTokens.length) {
+        break;
+      }
+    }
+  }
+
+  // Second pass: Find matches for remaining new tokens, but be more conservative
+  // Only match if tokens are reasonably close to their expected position
+  for (let newIndex = 0; newIndex < newTokens.length; newIndex++) {
+    // Skip if we already matched this new token
+    if (result.some((r) => r.newIndex === newIndex)) continue;
+
+    const newToken = newTokens[newIndex];
+    const newSig = createContentSignature(newToken);
+
+    // Look for matching old tokens that haven't been used
+    let bestMatch = -1;
+    let bestScore = -1;
+
+    for (let oldIndex = 0; oldIndex < oldTokens.length; oldIndex++) {
+      if (usedOldIndices.has(oldIndex)) continue;
+
+      const oldToken = oldTokens[oldIndex];
+      const oldSig = createContentSignature(oldToken);
+
+      // For exact matches or whitespace-to-whitespace matches
+      const isMatch =
+        oldSig === newSig ||
+        (oldToken.type === "whitespace" && newToken.type === "whitespace");
+
+      if (isMatch) {
+        // Calculate a score based on how close this match is to the expected position
+        // and whether it maintains relative order
+
+        // Check if this match maintains order relative to existing matches
+        let maintainsOrder = true;
+        for (const existingMatch of result) {
+          if (
+            existingMatch.newIndex < newIndex &&
+            existingMatch.oldIndex > oldIndex
+          ) {
+            maintainsOrder = false;
+            break;
+          }
+          if (
+            existingMatch.newIndex > newIndex &&
+            existingMatch.oldIndex < oldIndex
+          ) {
+            maintainsOrder = false;
+            break;
+          }
+        }
+
+        if (!maintainsOrder) continue;
+
+        // Calculate proximity score - prefer matches that are close to expected position
+        const expectedOldPosition =
+          (newIndex / newTokens.length) * oldTokens.length;
+        const distance = Math.abs(oldIndex - expectedOldPosition);
+        const maxDistance = Math.max(oldTokens.length, newTokens.length);
+        const proximityScore = 1 - distance / maxDistance;
+
+        // Give bonus for exact content matches
+        const contentBonus = oldSig === newSig ? 0.2 : 0;
+        const score = proximityScore + contentBonus;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = oldIndex;
+        }
+      }
+    }
+
+    // Only accept the match if it has a reasonable score
+    // This prevents matching tokens that are too far from their expected position
+    if (bestMatch !== -1 && bestScore > 0.3) {
+      result.push({ oldIndex: bestMatch, newIndex: newIndex });
+      usedOldIndices.add(bestMatch);
+    }
+  }
+
+  // Sort by newIndex to maintain order
+  result.sort((a, b) => a.newIndex - b.newIndex);
+
+  return result;
+}
 
 const getTokenColor = (token: CodeToken): string => {
   switch (token.type) {
-    case 'tag': return '#ff6b6b';
-    case 'keyword': return '#4ecdc4';
-    case 'string': return '#95e1d3';
-    case 'number': return '#ff8b94';
-    case 'operator': return '#fce38a';
-    case 'comment': return '#6c757d';
-    case 'attribute': return '#a8e6cf';
-    case 'punctuation': return '#ffd93d';
-    default: return '#ffffff';
+    case "tag":
+      return "#ff6b6b";
+    case "attribute":
+      return "#a8e6cf";
+    case "keyword":
+      return "#4ecdc4";
+    case "string":
+      return "#95e1d3";
+    case "number":
+      return "#ff8b94";
+    case "operator":
+      return "#fce38a";
+    case "comment":
+      return "#6c757d";
+    case "punctuation":
+      return "#ffd93d";
+    default:
+      return "#ffffff";
   }
 };
 
@@ -202,47 +436,77 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
   fontSize,
   showLineNumbers,
   isAnimating,
-  onAnimationComplete
+  onAnimationComplete,
+  manualHighlights = [],
+  useManualHighlightsOnly = false,
 }) => {
-  const [animationPhase, setAnimationPhase] = useState<'idle' | 'positioning' | 'adding' | 'complete'>('idle');
-  
+  const [animationPhase, setAnimationPhase] = useState<
+    "idle" | "positioning" | "adding" | "complete"
+  >("idle");
+
   // Auto-detect language if not provided or if it's the default
   const detectedLanguage = useMemo(() => {
     return detectLanguage(currentCode) || providedLanguage;
   }, [currentCode, providedLanguage]);
 
-  const currentTokens = useMemo(() => tokenizeCode(currentCode, detectedLanguage), [currentCode, detectedLanguage]);
-  const previousTokens = useMemo(() => tokenizeCode(previousCode, detectedLanguage), [previousCode, detectedLanguage]);
+  const currentTokens = useMemo(
+    () => tokenizeCode(currentCode, detectedLanguage),
+    [currentCode, detectedLanguage]
+  );
+  const previousTokens = useMemo(
+    () => tokenizeCode(previousCode, detectedLanguage),
+    [previousCode, detectedLanguage]
+  );
 
   const changes = useMemo(() => {
     if (!previousCode || !isAnimating) {
       return currentTokens.map((token, index) => ({
-        type: 'keep' as const,
+        type: "keep" as const,
         token,
-        newIndex: index
+        newIndex: index,
       }));
     }
-    return calculateTokenDiff(previousTokens, currentTokens);
-  }, [previousTokens, currentTokens, previousCode, isAnimating]);
+
+    // Use manual highlights if provided, otherwise fall back to automatic diff
+    if (useManualHighlightsOnly || manualHighlights.length > 0) {
+      const manualChanges = applyManualHighlights(currentTokens, manualHighlights);
+      
+      console.log("=== MANUAL HIGHLIGHTS DEBUG ===");
+      console.log("Manual highlights:", manualHighlights);
+      console.log("Changes:", manualChanges.map(c => `${c.type}: ${c.token.type}:'${c.token.content}' (Manual: ${c.isManuallyHighlighted})`));
+      
+      return manualChanges;
+    }
+
+    // Automatic diff detection
+    const diff = calculateTokenDiff(previousTokens, currentTokens);
+    
+    console.log("=== AUTO DIFF DEBUG ===");
+    console.log("Previous code:", JSON.stringify(previousCode));
+    console.log("Current code:", JSON.stringify(currentCode));
+    console.log("Changes:", diff.map(c => `${c.type}: ${c.token.type}:'${c.token.content}' (ID: ${c.token.id})`));
+    
+    return diff;
+  }, [previousTokens, currentTokens, previousCode, currentCode, isAnimating, manualHighlights, useManualHighlightsOnly]);
 
   useEffect(() => {
     if (!isAnimating) {
-      setAnimationPhase('idle');
+      setAnimationPhase("idle");
       return;
     }
 
-    // Phase 1: Position existing elements (move/keep)
-    setAnimationPhase('positioning');
-    
+    // Phase 1: Position existing elements (move/keep) - faster since these should feel stable
+    setAnimationPhase("positioning");
+
     setTimeout(() => {
-      // Phase 2: Add new elements
-      setAnimationPhase('adding');
-      
+      // Phase 2: Add new elements - slower to emphasize new content for teaching
+      setAnimationPhase("adding");
+
       setTimeout(() => {
-        setAnimationPhase('complete');
+        setAnimationPhase("complete");
         onAnimationComplete();
-      }, 800); // Longer duration for smoother additions
-    }, 600); // Longer duration for positioning
+      }, ANIMATION_TIMINGS.ADDING_PHASE_DURATION);
+    }, ANIMATION_TIMINGS.POSITIONING_PHASE_DURATION);
   }, [isAnimating, onAnimationComplete]);
 
   // Group tokens by lines for proper rendering
@@ -252,21 +516,22 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
     let lineNumber = 1;
 
     // Filter changes based on animation phase
-    const visibleChanges = changes.filter(change => {
-      if (change.type === 'remove') return false;
-      if (change.type === 'add' && animationPhase === 'positioning') return false;
+    const visibleChanges = changes.filter((change) => {
+      if (change.type === "remove") return false;
+      if (change.type === "add" && animationPhase === "positioning")
+        return false;
       return true;
     });
 
-    visibleChanges.forEach(change => {
-      if (change.token.content.includes('\n')) {
+    visibleChanges.forEach((change) => {
+      if (change.token.content.includes("\n")) {
         // Split on newlines
-        const parts = change.token.content.split('\n');
+        const parts = change.token.content.split("\n");
         parts.forEach((part, index) => {
           if (part) {
             currentLine.push({
               ...change,
-              token: { ...change.token, content: part }
+              token: { ...change.token, content: part },
             });
           }
           if (index < parts.length - 1) {
@@ -287,9 +552,9 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
     return lines.map(({ tokens, lineNumber: lineNum }) => (
       <div key={lineNum} className="flex items-start min-h-[1.5em]">
         {showLineNumbers && (
-          <div 
-            className="text-gray-500 text-right pr-4 select-none flex-shrink-0" 
-            style={{ minWidth: '3em', fontSize: `${fontSize}px` }}
+          <div
+            className="text-gray-500 text-right pr-4 select-none flex-shrink-0"
+            style={{ minWidth: "3em", fontSize: `${fontSize}px` }}
           >
             {lineNum}
           </div>
@@ -304,10 +569,15 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
                   fontSize: `${fontSize}px`,
                   fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
                   color: getTokenColor(change.token),
-                  whiteSpace: change.token.type === 'whitespace' ? 'pre' : 'normal'
+                  whiteSpace:
+                    change.token.type === "whitespace" ? "pre" : "normal",
+                  // Add visual indicator for manually highlighted content
+                  backgroundColor: change.isManuallyHighlighted ? "rgba(255, 215, 0, 0.2)" : "transparent",
+                  border: change.isManuallyHighlighted ? "1px solid rgba(255, 215, 0, 0.5)" : "none",
+                  borderRadius: change.isManuallyHighlighted ? "2px" : "0",
                 }}
                 initial={
-                  change.type === 'add'
+                  change.type === "add"
                     ? { opacity: 0, scale: 0.8, y: -10 }
                     : { opacity: 1, scale: 1 }
                 }
@@ -315,17 +585,26 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
                   opacity: 1,
                   scale: 1,
                   y: 0,
-                  x: 0
+                  x: 0,
                 }}
                 exit={{
                   opacity: 0,
                   scale: 0.8,
-                  y: 10
+                  y: 10,
                 }}
                 transition={{
-                  duration: change.type === 'add' ? 0.5 : 0.4,
-                  ease: "easeOut",
-                  delay: change.type === 'add' ? index * 0.08 : 0
+                  duration:
+                    change.type === "add"
+                      ? ANIMATION_TIMINGS.NEW_ELEMENT_DURATION
+                      : ANIMATION_TIMINGS.EXISTING_ELEMENT_DURATION,
+                  ease:
+                    change.type === "add"
+                      ? ANIMATION_TIMINGS.NEW_ELEMENT_EASING
+                      : ANIMATION_TIMINGS.EXISTING_ELEMENT_EASING,
+                  delay:
+                    change.type === "add"
+                      ? index * ANIMATION_TIMINGS.NEW_ELEMENT_STAGGER_DELAY
+                      : 0,
                 }}
                 layout
                 layoutId={change.token.id}
@@ -341,9 +620,7 @@ export const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
 
   return (
     <div className="bg-gray-900 rounded-lg overflow-hidden p-6 font-mono leading-relaxed">
-      <div className="space-y-1">
-        {renderTokens()}
-      </div>
+      <div className="space-y-1">{renderTokens()}</div>
     </div>
   );
 };
