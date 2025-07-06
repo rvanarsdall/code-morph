@@ -6,7 +6,6 @@ import { Copy, Check, Video, Square } from "lucide-react";
 import {
   AnimatedCodeDisplayProps,
   CodeToken,
-  HighlightRange,
   ANIMATION_TIMINGS,
 } from "./AnimatedCodeDisplay/types";
 import { tokenizeCode, detectLanguage } from "./AnimatedCodeDisplay/tokenizer";
@@ -28,12 +27,10 @@ import {
 const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
   currentCode,
   previousCode,
-  language,
   fontSize,
   showLineNumbers,
   isAnimating,
   onAnimationComplete,
-  manualHighlights = [],
   useManualHighlightsOnly = false,
 }) => {
   const [copySuccess, setCopySuccess] = useState(false);
@@ -43,14 +40,13 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
     status: "",
   });
   const [animationKey, setAnimationKey] = useState(0);
-  const [animationJustCompleted, setAnimationJustCompleted] = useState(false);
   const displayRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const detectedLanguage = useMemo(() => {
-    // Use provided language if available, otherwise detect from code
-    return language || detectLanguage(currentCode);
-  }, [currentCode, language]);
+  const detectedLanguage = useMemo(
+    () => detectLanguage(currentCode),
+    [currentCode]
+  );
 
   // Detect if there's a significant language change that should reset the diff
   const shouldIgnorePreviousCode = useMemo(() => {
@@ -95,24 +91,20 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
     // Handle case when there's no previous code or language changed significantly
     if (!previousCode || shouldIgnorePreviousCode) {
       // No previous code or language changed, so all tokens are static (no animation)
-      // Preserve all original token properties for proper syntax highlighting
       return tokenizedCodes.currentTokens.map((token, index) => ({
         ...token,
         status: "unchanged" as const,
         newIndex: index,
-        oldIndex: undefined, // No previous reference
       }));
     }
 
-    // Handle case when animation is not active AND we've given time for animations to complete
-    if (!isAnimating && !animationJustCompleted) {
+    // Handle case when animation is not active
+    if (!isAnimating) {
       // Animation is complete or not started, show all tokens as static
-      // Preserve all original token properties for proper syntax highlighting
       return tokenizedCodes.currentTokens.map((token, index) => ({
         ...token,
         status: "unchanged" as const,
         newIndex: index,
-        oldIndex: undefined, // No previous reference when not animating
       }));
     }
 
@@ -127,120 +119,42 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
       unchanged: diff.filter((t) => t.status === "unchanged").length,
     });
     return diff;
-  }, [tokenizedCodes, previousCode, isAnimating, shouldIgnorePreviousCode, animationJustCompleted]);
+  }, [tokenizedCodes, previousCode, isAnimating, shouldIgnorePreviousCode]);
 
   const renderTokens = useMemo(() => {
-    // During animation or just after completion, show ALL tokens (removed, unchanged, and added)
-    // This ensures the user sees the full transformation from previous to current state
-    let tokens;
-
-    if ((isAnimating || animationJustCompleted) && previousCode && !shouldIgnorePreviousCode) {
-      // During animation: include ALL diff tokens (removed ones will fade out, added ones will fade in)
-      tokens = diffResult.map((token, index) => ({
-        ...token,
-        isManuallyHighlighted: checkManualHighlight(
-          token,
-          index,
-          manualHighlights
-        ),
-      }));
-    } else {
-      // When not animating: only show non-removed tokens (final state)
-      tokens = diffResult
-        .filter((token) => token.status !== "removed")
-        .map((token, index) => ({
-          ...token,
-          isManuallyHighlighted: checkManualHighlight(
-            token,
-            index,
-            manualHighlights
-          ),
-        }));
-    }
+    const tokens = diffResult.map((token) => ({
+      ...token,
+      isManuallyHighlighted: checkManualHighlight(),
+    }));
 
     if (useManualHighlightsOnly) {
       return tokens.filter((token) => token.isManuallyHighlighted);
     }
 
     return tokens;
-  }, [
-    diffResult,
-    useManualHighlightsOnly,
-    manualHighlights,
-    isAnimating,
-    animationJustCompleted,
-    previousCode,
-    shouldIgnorePreviousCode,
-  ]);
+  }, [diffResult, useManualHighlightsOnly]);
 
   // Animation effects with educational timing and state reset
   useEffect(() => {
-    if (!isAnimating) {
-      // Reset the just completed state when starting fresh
-      if (animationJustCompleted) {
-        setAnimationJustCompleted(false);
-      }
-      return;
-    }
+    if (!isAnimating) return;
 
     // Reset animation key to force remount of motion components
     setAnimationKey((prev) => prev + 1);
-    setAnimationJustCompleted(false);
 
-    // Calculate the total animation duration
-    const basePhases =
+    // Use the new educational animation phases
+    const phases =
       ANIMATION_TIMINGS.POSITIONING_PHASE_DURATION +
       ANIMATION_TIMINGS.PAUSE_BETWEEN_PHASES +
       ANIMATION_TIMINGS.ADDING_PHASE_DURATION;
 
-    // Account for the longest possible individual element animation
-    // Use a conservative estimate for new elements count
-    const maxNewElements = Math.max(
-      tokenizedCodes.currentTokens.length -
-        tokenizedCodes.previousTokens.length,
-      5 // Minimum estimate
-    );
-    const longestNewElementAnimation =
-      ANIMATION_TIMINGS.NEW_ELEMENT_DURATION * 1000 + // Convert to ms
-      maxNewElements * ANIMATION_TIMINGS.NEW_ELEMENT_STAGGER_DELAY * 1000; // Convert to ms
-
-    // Use the longer of the two calculations, plus a small buffer
-    const totalDuration =
-      Math.max(
-        basePhases,
-        ANIMATION_TIMINGS.POSITIONING_PHASE_DURATION +
-          ANIMATION_TIMINGS.PAUSE_BETWEEN_PHASES +
-          longestNewElementAnimation
-      ) + 300; // Larger buffer to ensure animations complete
-
-    console.log("🎬 Animation timing:", {
-      basePhases,
-      longestNewElementAnimation,
-      totalDuration,
-      maxNewElements,
-    });
-
     const completeTimer = setTimeout(() => {
-      // Set the just completed flag to maintain diff state briefly
-      setAnimationJustCompleted(true);
       onAnimationComplete();
-      
-      // After a short delay, allow the final state to show
-      setTimeout(() => {
-        setAnimationJustCompleted(false);
-      }, 100); // 100ms delay to let exit animations finish
-    }, totalDuration);
+    }, phases);
 
     return () => {
       clearTimeout(completeTimer);
     };
-  }, [
-    isAnimating,
-    onAnimationComplete,
-    animationJustCompleted,
-    tokenizedCodes.currentTokens.length,
-    tokenizedCodes.previousTokens.length,
-  ]);
+  }, [isAnimating, onAnimationComplete]);
 
   // Copy functionality
   const handleCopy = async () => {
@@ -355,7 +269,7 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
         key={`code-display-${animationKey}`}
         ref={displayRef}
         className="bg-gray-900 text-gray-100 rounded-lg p-4 overflow-auto font-mono"
-        style={{ fontSize: `${fontSize}px` }} // Dynamic font size from props
+        style={{ fontSize: `${fontSize}px` }}
       >
         {splitTokensIntoLinesWithNumbers(renderTokens).map(
           ({ tokens, lineNumber }) => (
@@ -363,7 +277,7 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
               {showLineNumbers && (
                 <div
                   className="text-gray-500 text-right pr-4 select-none flex-shrink-0"
-                  style={{ minWidth: "3em", fontSize: `${fontSize}px` }} // Dynamic font size matching code
+                  style={{ minWidth: "3em", fontSize: `${fontSize}px` }}
                 >
                   {lineNumber}
                 </div>
@@ -392,7 +306,7 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
       <canvas
         ref={canvasRef}
         className="hidden"
-        style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} // Recording canvas positioning
+        style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
       />
     </div>
   );
@@ -443,19 +357,18 @@ const TokenComponent = React.forwardRef<
         layoutId: isAnimating ? token.id : undefined,
       };
     } else if (token.status === "removed") {
-      // Removed elements: Start visible, then fade out quickly during the first phase
+      // Removed elements: Fade out quickly
       return {
-        initial: { opacity: 1, scale: 1 },
-        animate: { opacity: 0, scale: 0.7, y: -15 },
+        initial: { opacity: 1 },
+        animate: { opacity: 0 },
         exit: {
           opacity: 0,
-          scale: 0.5,
-          y: -20,
+          scale: 0.7,
+          y: 15,
         },
         transition: {
-          duration: ANIMATION_TIMINGS.EXISTING_ELEMENT_DURATION * 0.8, // Slightly longer for cleaner exit
-          delay: 0, // Start immediately
-          ease: [0.4, 0, 1, 1], // Use easing array instead of string
+          duration: ANIMATION_TIMINGS.EXISTING_ELEMENT_DURATION * 0.5, // Faster removal
+          ease: ANIMATION_TIMINGS.EXISTING_ELEMENT_EASING,
         },
         layout: isAnimating,
         layoutId: isAnimating ? token.id : undefined,
@@ -515,20 +428,9 @@ function checkForDuplicateIds(tokens: CodeToken[]): string[] {
   return duplicates;
 }
 
-function checkManualHighlight(
-  _token: CodeToken,
-  index: number,
-  manualHighlights: HighlightRange[] = []
-): boolean {
-  // Calculate the character position of this token
-  // This is a simplified implementation - for more accuracy, you'd need to calculate
-  // the actual character position based on the token's position in the reconstructed code
-  const tokenPosition = index;
-
-  return manualHighlights.some(
-    (highlight) =>
-      tokenPosition >= highlight.start && tokenPosition <= highlight.end
-  );
+function checkManualHighlight(): boolean {
+  // TODO: Implement manual highlight checking based on character positions
+  return false;
 }
 
 export { AnimatedCodeDisplay };

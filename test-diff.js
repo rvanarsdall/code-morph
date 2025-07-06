@@ -233,16 +233,16 @@ function findLongestCommonSubsequence(oldTokens, newTokens) {
   return result;
 }
 
-// Test the specific case - empty function to function with body
-const oldCode = "function convertAge(age){\n\n}";
-const newCode = "function convertAge(age){\n   let newAge = age * 20 + 12\n}";
+// Test the HTML attribute case - this should show proper animation
+const oldCode = "<h1>Hello World</h1>";
+const newCode = '<h1 class="header-text">Hello World</h1>';
 
-console.log("=== TESTING EMPTY FUNCTION TO FUNCTION WITH BODY ===");
+console.log("=== TESTING HTML ATTRIBUTE ADDITION ===");
 console.log("OLD:", JSON.stringify(oldCode));
 console.log("NEW:", JSON.stringify(newCode));
 
-const oldTokens = tokenizeCode(oldCode, "javascript");
-const newTokens = tokenizeCode(newCode, "javascript");
+const oldTokens = tokenizeCode(oldCode, "html");
+const newTokens = tokenizeCode(newCode, "html");
 
 console.log("\nOLD TOKENS:");
 oldTokens.forEach((token, i) => {
