@@ -42,6 +42,8 @@ export const tokenizeCode = (code: string, language: string): CodeToken[] => {
 
   if (language === "html") {
     tokens = tokenizeHTML(code, sessionId, localCounter);
+  } else if (language === "css") {
+    tokens = tokenizeCSS(code, sessionId, localCounter);
   } else {
     tokens = tokenizeJavaScript(code, sessionId, localCounter);
   }
@@ -341,3 +343,254 @@ const tokenizeJavaScript = (
 
   return tokens;
 };
+
+const tokenizeCSS = (
+  code: string,
+  sessionId: string,
+  localCounterStart: number
+): CodeToken[] => {
+  const tokens: CodeToken[] = [];
+  let localCounter = localCounterStart;
+  let i = 0;
+
+  while (i < code.length) {
+    const char = code[i];
+    const nextChar = code[i + 1];
+
+    // CSS Comments
+    if (char === "/" && nextChar === "*") {
+      const start = i;
+      let end = i + 2;
+      while (end < code.length - 1) {
+        if (code[end] === "*" && code[end + 1] === "/") {
+          end += 2;
+          break;
+        }
+        end++;
+      }
+      tokens.push({
+        type: "comment",
+        content: code.substring(start, end),
+        id: `${sessionId}-comment-${globalTokenCounter++}-${localCounter++}-${start}`,
+      });
+      i = end;
+      continue;
+    }
+
+    // CSS Strings
+    if (char === '"' || char === "'") {
+      const quote = char;
+      const start = i;
+      let end = i + 1;
+      while (end < code.length) {
+        if (code[end] === quote && code[end - 1] !== "\\") {
+          end++;
+          break;
+        }
+        end++;
+      }
+      tokens.push({
+        type: "string",
+        content: code.substring(start, end),
+        id: `${sessionId}-string-${globalTokenCounter++}-${localCounter++}-${start}`,
+      });
+      i = end;
+      continue;
+    }
+
+    // CSS Numbers (including units)
+    if (/[0-9]/.test(char)) {
+      const start = i;
+      let end = i;
+      while (end < code.length && /[0-9.]/.test(code[end])) end++;
+      // Include units like px, em, rem, %, etc.
+      while (end < code.length && /[a-zA-Z%]/.test(code[end])) end++;
+      tokens.push({
+        type: "number",
+        content: code.substring(start, end),
+        id: `${sessionId}-number-${globalTokenCounter++}-${localCounter++}-${start}`,
+      });
+      i = end;
+      continue;
+    }
+
+    // CSS Selectors and Properties
+    if (/[a-zA-Z_-]/.test(char)) {
+      const start = i;
+      let end = i;
+      while (end < code.length && /[a-zA-Z0-9_-]/.test(code[end])) end++;
+      const word = code.substring(start, end);
+
+      // CSS Properties
+      const cssProperties = [
+        "color",
+        "background",
+        "background-color",
+        "font-size",
+        "font-family",
+        "font-weight",
+        "margin",
+        "padding",
+        "border",
+        "width",
+        "height",
+        "display",
+        "position",
+        "top",
+        "left",
+        "right",
+        "bottom",
+        "z-index",
+        "opacity",
+        "transform",
+        "transition",
+        "animation",
+        "flex",
+        "grid",
+        "justify-content",
+        "align-items",
+        "text-align",
+        "line-height",
+        "box-shadow",
+        "border-radius",
+        "overflow",
+        "visibility",
+        "cursor",
+        "pointer-events",
+        "user-select",
+        "white-space",
+        "text-decoration",
+        "vertical-align",
+        "float",
+        "clear",
+        "content",
+        "list-style",
+        "outline",
+        "resize",
+        "min-width",
+        "max-width",
+        "min-height",
+        "max-height",
+      ];
+
+      // CSS Pseudo-classes and pseudo-elements
+      const cssPseudos = [
+        "hover",
+        "focus",
+        "active",
+        "visited",
+        "first-child",
+        "last-child",
+        "nth-child",
+        "before",
+        "after",
+        "first-line",
+        "first-letter",
+      ];
+
+      // CSS Values and Keywords
+      const cssValues = [
+        "auto",
+        "none",
+        "inherit",
+        "initial",
+        "unset",
+        "normal",
+        "bold",
+        "italic",
+        "underline",
+        "center",
+        "left",
+        "right",
+        "block",
+        "inline",
+        "flex",
+        "grid",
+        "absolute",
+        "relative",
+        "fixed",
+        "static",
+        "sticky",
+        "hidden",
+        "visible",
+        "transparent",
+        "solid",
+        "dashed",
+        "dotted",
+      ];
+
+      let type: CodeToken["type"] = "text";
+
+      if (cssProperties.includes(word)) {
+        type = "attribute"; // CSS properties
+      } else if (cssPseudos.includes(word)) {
+        type = "keyword"; // Pseudo-classes and pseudo-elements
+      } else if (cssValues.includes(word)) {
+        type = "keyword"; // CSS values
+      } else if (word.startsWith("#") || word.startsWith(".")) {
+        type = "tag"; // CSS selectors
+      }
+
+      tokens.push({
+        type,
+        content: word,
+        id: `${sessionId}-${type}-${globalTokenCounter++}-${localCounter++}-${start}`,
+      });
+
+      i = end;
+      continue;
+    }
+
+    // CSS Operators and Punctuation
+    if (/[{}();:,.]/.test(char)) {
+      tokens.push({
+        type: "operator",
+        content: char,
+        id: `${sessionId}-operator-${globalTokenCounter++}-${localCounter++}-${i}`,
+      });
+      i++;
+      continue;
+    }
+
+    // CSS ID and Class selectors
+    if (char === "#" || char === ".") {
+      const start = i;
+      let end = i + 1;
+      while (end < code.length && /[a-zA-Z0-9_-]/.test(code[end])) end++;
+      tokens.push({
+        type: "tag",
+        content: code.substring(start, end),
+        id: `${sessionId}-tag-${globalTokenCounter++}-${localCounter++}-${start}`,
+      });
+      i = end;
+      continue;
+    }
+
+    // Whitespace
+    if (/\s/.test(char)) {
+      const start = i;
+      let end = i;
+      while (end < code.length && /\s/.test(code[end])) end++;
+      tokens.push({
+        type: "whitespace",
+        content: code.substring(start, end),
+        id: `${sessionId}-whitespace-${globalTokenCounter++}-${localCounter++}-${start}`,
+      });
+      i = end;
+      continue;
+    }
+
+    // Everything else
+    tokens.push({
+      type: "text",
+      content: char,
+      id: `${sessionId}-text-${globalTokenCounter++}-${localCounter++}-${i}`,
+    });
+
+    i++;
+  }
+
+  return tokens;
+};
+
+export default tokenizeCode;

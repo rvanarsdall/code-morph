@@ -38,6 +38,7 @@ export interface AnimatedCodeDisplayProps {
   onAnimationComplete: () => void;
   manualHighlights?: HighlightRange[];
   useManualHighlightsOnly?: boolean;
+  onStartAnimation?: () => void; // Callback to request parent to start animation
 }
 
 export const ANIMATION_TIMINGS = {

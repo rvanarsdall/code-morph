@@ -419,6 +419,7 @@ function App() {
                     useManualHighlightsOnly={
                       currentState.useManualHighlightsOnly
                     }
+                    onStartAnimation={() => setIsAnimating(true)}
                   />
                 </div>
               </>

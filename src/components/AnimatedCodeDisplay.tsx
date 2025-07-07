@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Copy, Check, Video, Square } from "lucide-react";
+import { Copy, Check } from "lucide-react";
 
 // Import helper modules
 import {
@@ -18,12 +18,6 @@ import {
   splitTokensIntoLinesWithNumbers,
   RenderToken,
 } from "./AnimatedCodeDisplay/rendering";
-import {
-  recordAnimation,
-  downloadBlob,
-  setupRecordingCanvas,
-  RecordingState,
-} from "./AnimatedCodeDisplay/videoRecording";
 
 const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
   currentCode,
@@ -37,15 +31,9 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
   useManualHighlightsOnly = false,
 }) => {
   const [copySuccess, setCopySuccess] = useState(false);
-  const [recordingState, setRecordingState] = useState<RecordingState>({
-    isRecording: false,
-    progress: 0,
-    status: "",
-  });
   const [animationKey, setAnimationKey] = useState(0);
   const [animationJustCompleted, setAnimationJustCompleted] = useState(false);
   const displayRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const detectedLanguage = useMemo(() => {
     // Use provided language if available, otherwise detect from code
@@ -127,14 +115,24 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
       unchanged: diff.filter((t) => t.status === "unchanged").length,
     });
     return diff;
-  }, [tokenizedCodes, previousCode, isAnimating, shouldIgnorePreviousCode, animationJustCompleted]);
+  }, [
+    tokenizedCodes,
+    previousCode,
+    isAnimating,
+    shouldIgnorePreviousCode,
+    animationJustCompleted,
+  ]);
 
   const renderTokens = useMemo(() => {
     // During animation or just after completion, show ALL tokens (removed, unchanged, and added)
     // This ensures the user sees the full transformation from previous to current state
     let tokens;
 
-    if ((isAnimating || animationJustCompleted) && previousCode && !shouldIgnorePreviousCode) {
+    if (
+      (isAnimating || animationJustCompleted) &&
+      previousCode &&
+      !shouldIgnorePreviousCode
+    ) {
       // During animation: include ALL diff tokens (removed ones will fade out, added ones will fade in)
       tokens = diffResult.map((token, index) => ({
         ...token,
@@ -224,7 +222,7 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
       // Set the just completed flag to maintain diff state briefly
       setAnimationJustCompleted(true);
       onAnimationComplete();
-      
+
       // After a short delay, allow the final state to show
       setTimeout(() => {
         setAnimationJustCompleted(false);
@@ -257,56 +255,6 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
     }
   };
 
-  // Video recording functionality
-  const startRecording = async () => {
-    if (!displayRef.current || !canvasRef.current) return;
-
-    setRecordingState((prev) => ({
-      ...prev,
-      isRecording: true,
-      status: "Starting...",
-    }));
-
-    try {
-      const canvas = canvasRef.current;
-      setupRecordingCanvas(displayRef.current, canvas);
-
-      // Record the animation
-      const blob = await recordAnimation({
-        canvasElement: canvas,
-        duration:
-          ANIMATION_TIMINGS.POSITIONING_PHASE_DURATION +
-          ANIMATION_TIMINGS.ADDING_PHASE_DURATION,
-        onProgress: (progress) => {
-          setRecordingState((prev) => ({ ...prev, progress }));
-        },
-        onStatusChange: (status) => {
-          setRecordingState((prev) => ({ ...prev, status }));
-        },
-      });
-
-      if (blob) {
-        const filename = `code-animation-${Date.now()}.webm`;
-        downloadBlob(blob, filename);
-        setRecordingState((prev) => ({
-          ...prev,
-          status: "Download complete!",
-        }));
-      }
-    } catch (error) {
-      console.error("Recording failed:", error);
-      setRecordingState((prev) => ({ ...prev, status: "Recording failed" }));
-    } finally {
-      setTimeout(() => {
-        setRecordingState({ isRecording: false, progress: 0, status: "" });
-      }, 3000);
-    }
-  };
-
-  const stopRecording = () => {
-    setRecordingState({ isRecording: false, progress: 0, status: "" });
-  };
-
   return (
     <div className="relative">
       {/* Control buttons */}
@@ -322,33 +270,7 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
             <Copy className="w-4 h-4 text-gray-400" />
           )}
         </button>
-
-        <button
-          onClick={recordingState.isRecording ? stopRecording : startRecording}
-          disabled={recordingState.isRecording}
-          className={`p-2 rounded-md transition-colors ${
-            recordingState.isRecording
-              ? "bg-red-600 hover:bg-red-700"
-              : "bg-gray-800 hover:bg-gray-700"
-          }`}
-          title={
-            recordingState.isRecording ? "Stop recording" : "Record as MP4"
-          }
-        >
-          {recordingState.isRecording ? (
-            <Square className="w-4 h-4 text-white" />
-          ) : (
-            <Video className="w-4 h-4 text-gray-400" />
-          )}
-        </button>
       </div>
-
-      {/* Recording status */}
-      {recordingState.isRecording && (
-        <div className="absolute top-12 right-2 bg-red-600 text-white px-3 py-1 rounded-md text-sm z-10">
-          {recordingState.status} ({Math.round(recordingState.progress)}%)
-        </div>
-      )}
 
       {/* Code display */}
       <div
@@ -387,13 +309,6 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
           )
         )}
       </div>
-
-      {/* Hidden canvas for recording */}
-      <canvas
-        ref={canvasRef}
-        className="hidden"
-        style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} // Recording canvas positioning
-      />
     </div>
   );
 };
@@ -455,7 +370,7 @@ const TokenComponent = React.forwardRef<
         transition: {
           duration: ANIMATION_TIMINGS.EXISTING_ELEMENT_DURATION * 0.8, // Slightly longer for cleaner exit
           delay: 0, // Start immediately
-          ease: [0.4, 0, 1, 1], // Use easing array instead of string
+          ease: "easeOut" as const,
         },
         layout: isAnimating,
         layoutId: isAnimating ? token.id : undefined,
