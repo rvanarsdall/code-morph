@@ -16,23 +16,23 @@ export interface RenderToken extends DiffToken {
 export function getTokenColor(token: CodeToken | RenderToken): string {
   switch (token.type) {
     case "tag":
-      return "#ffd700"; // Golden yellow for CSS selectors like .header
+      return "#ff6b6b";
     case "attribute":
-      return "#9cdcfe"; // Light blue for CSS properties like background-color, padding
+      return "#a8e6cf";
     case "keyword":
-      return "#c586c0"; // Light purple for CSS keywords like center, auto
+      return "#4ecdc4";
     case "string":
-      return "#ce9178"; // Light orange for CSS string values
+      return "#95e1d3";
     case "number":
-      return "#b5cea8"; // Light green for CSS numbers and hex colors
+      return "#ff8b94";
     case "operator":
-      return "#d4d4d4"; // Light gray for CSS punctuation like :, ;, {, }
+      return "#fce38a";
     case "comment":
-      return "#6a9955"; // Green for CSS comments
+      return "#6c757d";
     case "punctuation":
-      return "#d4d4d4"; // Light gray for punctuation
+      return "#ffd93d";
     default:
-      return "#d4d4d4"; // Default light gray
+      return "#ffffff";
   }
 }
 

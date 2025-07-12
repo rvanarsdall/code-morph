@@ -1,427 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { Save, X, Code2, Copy, Wand2, CheckCircle, Eye, EyeOff } from "lucide-react";
-
-// Token types and interfaces (simplified from AnimatedCodeDisplay)
-interface CodeToken {
-  type: "tag" | "text" | "attribute" | "string" | "keyword" | "operator" | "punctuation" | "number" | "comment" | "whitespace";
-  content: string;
-  id: string;
-}
-
-// Auto-detect language from code content
-const detectLanguageForPreview = (code: string): string => {
-  if (/<[^>]+>/.test(code)) return "html";
-  if (/\b(function|const|let|var|=>)\b/.test(code)) return "javascript";
-  if (/\b(def|import|class|if __name__)\b/.test(code)) return "python";
-  if (/\{[^}]*:[^}]*\}/.test(code)) return "css";
-  if (/^\s*[{[]/.test(code.trim())) return "json";
-  return "html"; // default
-};
-
-// Simplified tokenizer based on AnimatedCodeDisplay
-const tokenizeCodeForPreview = (code: string, language: string): CodeToken[] => {
-  const tokens: CodeToken[] = [];
-
-  if (language === "html") {
-    const htmlRegex = /(<\/?[a-zA-Z][^>]*>)|(\s+)|([^<\s]+)/g;
-    let match;
-
-    while ((match = htmlRegex.exec(code)) !== null) {
-      const content = match[0];
-      const startPos = match.index;
-
-      if (match[1]) {
-        // HTML tag - parse for attributes
-        const tagContent = content;
-        const tagRegex = /(<\/?[a-zA-Z][a-zA-Z0-9]*)|(\s+)|([a-zA-Z-]+)(=)("[^"]*"|'[^']*'|[^\s>]+)?|(>)/g;
-        let tagMatch;
-        let subIndex = 0;
-
-        while ((tagMatch = tagRegex.exec(tagContent)) !== null) {
-          const part = tagMatch[0];
-          let type: CodeToken["type"] = "tag";
-
-          if (tagMatch[1]) type = "tag"; // Tag name
-          else if (tagMatch[2]) type = "whitespace"; // Whitespace
-          else if (tagMatch[3]) type = "attribute"; // Attribute name
-          else if (tagMatch[4]) type = "operator"; // Equals sign
-          else if (tagMatch[5]) type = "string"; // Attribute value
-          else if (tagMatch[6]) type = "tag"; // Closing >
-
-          if (part) {
-            tokens.push({
-              type,
-              content: part,
-              id: `${type}-${startPos}-${subIndex}`,
-            });
-            subIndex++;
-          }
-        }
-      } else if (match[2]) {
-        // Whitespace
-        tokens.push({
-          type: "whitespace",
-          content: content,
-          id: `whitespace-${startPos}`,
-        });
-      } else {
-        // Text content
-        tokens.push({
-          type: "text",
-          content: content,
-          id: `text-${startPos}`,
-        });
-      }
-    }
-  } else if (language === "css") {
-    // CSS tokenizer
-    let i = 0;
-    while (i < code.length) {
-      const char = code[i];
-      const nextChar = code[i + 1];
-
-      // CSS Comments
-      if (char === "/" && nextChar === "*") {
-        const start = i;
-        let end = i + 2;
-        while (end < code.length - 1) {
-          if (code[end] === "*" && code[end + 1] === "/") {
-            end += 2;
-            break;
-          }
-          end++;
-        }
-        tokens.push({
-          type: "comment",
-          content: code.substring(start, end),
-          id: `comment-${start}`,
-        });
-        i = end;
-        continue;
-      }
-
-      // CSS Strings
-      if (char === '"' || char === "'") {
-        const quote = char;
-        const start = i;
-        let end = i + 1;
-        while (end < code.length) {
-          if (code[end] === quote && code[end - 1] !== "\\") {
-            end++;
-            break;
-          }
-          end++;
-        }
-        tokens.push({
-          type: "string",
-          content: code.substring(start, end),
-          id: `string-${start}`,
-        });
-        i = end;
-        continue;
-      }
-
-      // CSS Numbers (including units)
-      if (/[0-9]/.test(char)) {
-        const start = i;
-        let end = i;
-        while (end < code.length && /[0-9.]/.test(code[end])) end++;
-        // Include units like px, em, rem, %, etc.
-        while (end < code.length && /[a-zA-Z%]/.test(code[end])) end++;
-        tokens.push({
-          type: "number",
-          content: code.substring(start, end),
-          id: `number-${start}`,
-        });
-        i = end;
-        continue;
-      }
-
-      // CSS Selectors and Properties
-      if (/[a-zA-Z_-]/.test(char)) {
-        const start = i;
-        let end = i;
-        while (end < code.length && /[a-zA-Z0-9_-]/.test(code[end])) end++;
-        const word = code.substring(start, end);
-
-        // CSS Properties
-        const cssProperties = [
-          "color", "background", "background-color", "font-size", "font-family", 
-          "font-weight", "margin", "padding", "border", "width", "height", 
-          "display", "position", "top", "left", "right", "bottom", "z-index",
-          "opacity", "transform", "transition", "animation", "flex", "grid",
-          "justify-content", "align-items", "text-align", "line-height",
-          "box-shadow", "border-radius", "overflow", "visibility", "cursor",
-          "pointer-events", "user-select", "white-space", "text-decoration",
-          "vertical-align", "float", "clear", "content", "list-style",
-        ];
-
-        // CSS Values and Keywords
-        const cssValues = [
-          "auto", "none", "inherit", "initial", "unset", "normal", "bold",
-          "italic", "underline", "center", "left", "right", "block", "inline",
-          "flex", "grid", "absolute", "relative", "fixed", "static", "sticky",
-          "hidden", "visible", "transparent", "solid", "dashed", "dotted"
-        ];
-
-        let type: CodeToken["type"] = "text";
-        
-        if (cssProperties.includes(word)) {
-          type = "attribute"; // CSS properties
-        } else if (cssValues.includes(word)) {
-          type = "keyword"; // CSS values
-        } else if (word.startsWith("#") || word.startsWith(".")) {
-          type = "tag"; // CSS selectors
-        }
-
-        tokens.push({
-          type,
-          content: word,
-          id: `${type}-${start}`,
-        });
-
-        i = end;
-        continue;
-      }
-
-      // CSS Operators and Punctuation
-      if (/[{}();:,.]/.test(char)) {
-        tokens.push({
-          type: "operator",
-          content: char,
-          id: `operator-${i}`,
-        });
-        i++;
-        continue;
-      }
-
-      // CSS ID and Class selectors
-      if (char === "#" || char === ".") {
-        const start = i;
-        let end = i + 1;
-        while (end < code.length && /[a-zA-Z0-9_-]/.test(code[end])) end++;
-        tokens.push({
-          type: "tag",
-          content: code.substring(start, end),
-          id: `tag-${start}`,
-        });
-        i = end;
-        continue;
-      }
-
-      // Whitespace
-      if (/\s/.test(char)) {
-        const start = i;
-        let end = i;
-        while (end < code.length && /\s/.test(code[end])) end++;
-        tokens.push({
-          type: "whitespace",
-          content: code.substring(start, end),
-          id: `whitespace-${start}`,
-        });
-        i = end;
-        continue;
-      }
-
-      // Everything else
-      tokens.push({
-        type: "text",
-        content: char,
-        id: `text-${i}`,
-      });
-
-      i++;
-    }
-  } else {
-    // JavaScript/other languages tokenizer
-    let i = 0;
-    while (i < code.length) {
-      const char = code[i];
-      const nextChar = code[i + 1];
-
-      // Single-line comments
-      if (char === "/" && nextChar === "/") {
-        const start = i;
-        let end = i + 2;
-        while (end < code.length && code[end] !== "\n") end++;
-        tokens.push({
-          type: "comment",
-          content: code.substring(start, end),
-          id: `comment-${start}`,
-        });
-        i = end;
-        continue;
-      }
-
-      // Multi-line comments
-      if (char === "/" && nextChar === "*") {
-        const start = i;
-        let end = i + 2;
-        while (end < code.length - 1) {
-          if (code[end] === "*" && code[end + 1] === "/") {
-            end += 2;
-            break;
-          }
-          end++;
-        }
-        tokens.push({
-          type: "comment",
-          content: code.substring(start, end),
-          id: `comment-${start}`,
-        });
-        i = end;
-        continue;
-      }
-
-      // String literals
-      if (char === '"' || char === "'" || char === "`") {
-        const quote = char;
-        const start = i;
-        let end = i + 1;
-        while (end < code.length) {
-          if (code[end] === quote && code[end - 1] !== "\\") {
-            end++;
-            break;
-          }
-          end++;
-        }
-        tokens.push({
-          type: "string",
-          content: code.substring(start, end),
-          id: `string-${start}`,
-        });
-        i = end;
-        continue;
-      }
-
-      // Whitespace
-      if (/\s/.test(char)) {
-        const start = i;
-        let end = i;
-        while (end < code.length && /\s/.test(code[end])) end++;
-        tokens.push({
-          type: "whitespace",
-          content: code.substring(start, end),
-          id: `whitespace-${start}`,
-        });
-        i = end;
-        continue;
-      }
-
-      // Numbers
-      if (/[0-9]/.test(char)) {
-        const start = i;
-        let end = i;
-        while (end < code.length && /[0-9.]/.test(code[end])) end++;
-        tokens.push({
-          type: "number",
-          content: code.substring(start, end),
-          id: `number-${start}`,
-        });
-        i = end;
-        continue;
-      }
-
-      // Operators and punctuation
-      if (/[{}[\]();,.:=+\-*/%<>!&|]/.test(char)) {
-        tokens.push({
-          type: "operator",
-          content: char,
-          id: `operator-${i}`,
-        });
-        i++;
-        continue;
-      }
-
-      // Keywords and identifiers
-      if (/[a-zA-Z_$]/.test(char)) {
-        const start = i;
-        let end = i;
-        while (end < code.length && /[a-zA-Z0-9_$]/.test(code[end])) end++;
-        const word = code.substring(start, end);
-        
-        // Check if it's a keyword
-        const keywords = {
-          javascript: ["function", "const", "let", "var", "if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return", "try", "catch", "finally", "throw", "class", "extends", "import", "export", "from", "as", "async", "await", "new", "this", "super", "typeof", "instanceof", "in", "of", "delete", "void", "null", "undefined", "true", "false"],
-          python: ["def", "class", "if", "elif", "else", "for", "while", "try", "except", "finally", "with", "as", "import", "from", "return", "yield", "break", "continue", "pass", "global", "nonlocal", "lambda", "and", "or", "not", "in", "is", "None", "True", "False"],
-        };
-        
-        const langKeywords = keywords[language as keyof typeof keywords] || [];
-        const isKeyword = langKeywords.includes(word);
-        
-        tokens.push({
-          type: isKeyword ? "keyword" : "text",
-          content: word,
-          id: `${isKeyword ? "keyword" : "text"}-${start}`,
-        });
-        i = end;
-        continue;
-      }
-
-      // Everything else
-      tokens.push({
-        type: "text",
-        content: char,
-        id: `text-${i}`,
-      });
-      i++;
-    }
-  }
-
-  return tokens;
-};
-
-// Get color for tokens (matching AnimatedCodeDisplay) - kept for reference
-// const getTokenColor = (token: CodeToken): string => {
-//   switch (token.type) {
-//     case "tag": return "#ff6b6b";
-//     case "attribute": return "#a8e6cf";
-//     case "keyword": return "#4ecdc4";
-//     case "string": return "#95e1d3";
-//     case "number": return "#ff8b94";
-//     case "operator": return "#fce38a";
-//     case "comment": return "#6c757d";
-//     case "punctuation": return "#ffd93d";
-//     default: return "#ffffff";
-//   }
-// };
-
-// Simple CodePreview component that reuses AnimatedCodeDisplay's logic
-const CodePreview: React.FC<{ code: string; language: string }> = ({ code, language }) => {
-  const tokens = useMemo(() => {
-    return tokenizeCodeForPreview(code, language);
-  }, [code, language]);
-
-  const tokenStyles = {
-    tag: { color: "#ff6b6b" },
-    attribute: { color: "#a8e6cf" }, 
-    keyword: { color: "#4ecdc4" },
-    string: { color: "#95e1d3" },
-    number: { color: "#ff8b94" },
-    operator: { color: "#fce38a" },
-    comment: { color: "#6c757d" },
-    punctuation: { color: "#ffd93d" },
-    text: { color: "#ffffff" },
-    whitespace: { color: "#ffffff" },
-  };
-
-  return (
-    <div className="space-y-1 font-mono">
-      {tokens.map((token) => (
-        <span
-          key={token.id}
-          style={{
-            ...tokenStyles[token.type],
-            whiteSpace: token.type === "whitespace" ? "pre" : "normal",
-          }}
-        >
-          {token.content}
-        </span>
-      ))}
-    </div>
-  );
-};
+import { Save, X, Code2, Copy, Wand2, CheckCircle } from "lucide-react";
 
 interface HighlightRange {
   start: number;
@@ -471,93 +50,6 @@ const isWellFormatted = (code: string, language: string): boolean => {
     const hasConsistentStructure = !code.match(/><[^>]/); // No tags smashed together
 
     return hasProperIndentation && hasMultipleLines && hasConsistentStructure;
-  }
-
-  if (language === "javascript" || language === "typescript") {
-    // More strict JavaScript formatting check
-    const hasMultipleLines = lines.length > 1;
-    if (!hasMultipleLines) return false;
-
-    // Check for consistent indentation
-    let hasProperIndentation = false;
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const trimmedLine = line.trim();
-      
-      // Skip empty lines
-      if (!trimmedLine) continue;
-
-      // Check for consistent indentation pattern
-      const leadingSpaces = line.length - line.trimStart().length;
-      
-      // If this line ends with {, next non-empty line should be indented more
-      if (trimmedLine.endsWith("{")) {
-        const nextNonEmptyLine = lines.slice(i + 1).find(l => l.trim());
-        if (nextNonEmptyLine) {
-          const nextLeadingSpaces = nextNonEmptyLine.length - nextNonEmptyLine.trimStart().length;
-          const nextTrimmed = nextNonEmptyLine.trim();
-          
-          // Next line should be indented more (unless it's a closing brace)
-          if (!nextTrimmed.startsWith("}") && nextLeadingSpaces <= leadingSpaces) {
-            return false; // Inconsistent indentation
-          }
-          if (nextLeadingSpaces > leadingSpaces) {
-            hasProperIndentation = true;
-          }
-        }
-      }
-      
-      // Check for closing braces - they should be at the right indentation level
-      if (trimmedLine.startsWith("}")) {
-        // Find the opening brace line
-        let braceLevel = 0;
-        for (let j = i - 1; j >= 0; j--) {
-          const prevLine = lines[j].trim();
-          if (prevLine.includes("}")) braceLevel++;
-          if (prevLine.includes("{")) {
-            if (braceLevel === 0) {
-              const openBraceSpaces = lines[j].length - lines[j].trimStart().length;
-              // Closing brace should align with opening brace
-              if (leadingSpaces !== openBraceSpaces) {
-                return false;
-              }
-              break;
-            }
-            braceLevel--;
-          }
-        }
-      }
-      
-      // Check for extremely inconsistent spacing (like the example)
-      if (leadingSpaces > 0 && leadingSpaces % 2 !== 0) {
-        return false; // Odd number of spaces suggests inconsistent formatting
-      }
-      
-      // Check for really bad indentation patterns (excessive spacing)
-      if (leadingSpaces > 8) {
-        return false; // Too much indentation suggests poor formatting
-      }
-      
-      // Check for inconsistent indentation between adjacent lines
-      if (i > 0) {
-        const prevLine = lines[i - 1];
-        const prevTrimmed = prevLine.trim();
-        const prevSpaces = prevLine.length - prevLine.trimStart().length;
-        
-        // If both lines are at the same logical level (no braces between), they should have same indentation
-        if (prevTrimmed && !prevTrimmed.endsWith("{") && !trimmedLine.startsWith("}") && 
-            !prevTrimmed.endsWith(";") && Math.abs(leadingSpaces - prevSpaces) > 2) {
-          return false; // Inconsistent indentation between similar lines
-        }
-      }
-    }
-    
-    // Additional checks for consistent formatting
-    const hasConsistentBraces = !code.match(/\w\{/) && !code.match(/\}\s*else/);
-    const hasProperSpacing = !code.match(/function\w/) && !code.match(/\w\(/);
-    
-    return hasProperIndentation && hasConsistentBraces && hasProperSpacing;
   }
 
   // For other languages, check for basic formatting
@@ -707,39 +199,77 @@ const formatHTML = (html: string): string => {
   return formatted.trim();
 };
 
-// Simple and effective JavaScript formatter
+// More conservative JavaScript formatter
 const formatJavaScript = (js: string): string => {
-  // Split into lines and normalize indentation
-  const lines = js.split('\n');
-  const formatted = [];
-  let currentIndent = 0;
+  // If already formatted, just clean up
+  if (isWellFormatted(js, "javascript")) {
+    return js.replace(/\n\s*\n/g, "\n").trim();
+  }
+
+  let formatted = "";
+  let indent = 0;
   const tab = "  ";
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    
-    // Skip empty lines
-    if (!trimmed) {
-      formatted.push('');
-      continue;
-    }
-    
-    // If line starts with closing brace, reduce indent first
-    if (trimmed.startsWith('}')) {
-      currentIndent = Math.max(0, currentIndent - 1);
-    }
-    
-    // Apply current indentation
-    formatted.push(tab.repeat(currentIndent) + trimmed);
-    
-    // If line ends with opening brace, increase indent for next line
-    if (trimmed.endsWith('{')) {
-      currentIndent++;
+  let inString = false;
+  let stringChar = "";
+
+  for (let i = 0; i < js.length; i++) {
+    const char = js[i];
+    const nextChar = js[i + 1];
+    const prevChar = js[i - 1];
+
+    if (!inString && (char === '"' || char === "'" || char === "`")) {
+      inString = true;
+      stringChar = char;
+      formatted += char;
+    } else if (inString && char === stringChar && prevChar !== "\\") {
+      inString = false;
+      stringChar = "";
+      formatted += char;
+    } else if (!inString) {
+      if (char === "{") {
+        formatted += char;
+        if (nextChar !== "}") {
+          formatted += "\n";
+          indent++;
+          formatted += tab.repeat(indent);
+        }
+      } else if (char === "}") {
+        if (prevChar !== "{") {
+          formatted = formatted.trimEnd() + "\n";
+          indent = Math.max(0, indent - 1);
+          formatted += tab.repeat(indent);
+        }
+        formatted += char;
+        if (
+          nextChar &&
+          nextChar !== "," &&
+          nextChar !== ";" &&
+          nextChar !== ")" &&
+          nextChar !== "}"
+        ) {
+          formatted += "\n" + tab.repeat(indent);
+        }
+      } else if (
+        char === ";" &&
+        nextChar !== " " &&
+        nextChar !== "\n" &&
+        nextChar
+      ) {
+        formatted += char + "\n" + tab.repeat(indent);
+      } else if (char === "\n") {
+        // Skip multiple newlines
+        if (!formatted.endsWith("\n")) {
+          formatted += char;
+        }
+      } else {
+        formatted += char;
+      }
+    } else {
+      formatted += char;
     }
   }
-  
-  return formatted.join('\n').trim();
+
+  return formatted.replace(/\n\s*\n/g, "\n").trim();
 };
 
 // More conservative CSS formatter
@@ -821,7 +351,6 @@ export const StateEditor: React.FC<StateEditorProps> = ({
   const [isSelectingHighlight, setIsSelectingHighlight] = useState(false);
   const [highlightType, setHighlightType] =
     useState<HighlightRange["type"]>("new");
-  const [showPreview, setShowPreview] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -871,10 +400,9 @@ export const StateEditor: React.FC<StateEditorProps> = ({
         const selectedLines = value.substring(lineStart, actualLineEnd);
 
         if (selectedLines.startsWith("  ")) {
-          const twoSpaces = "  ";
           const newValue =
             value.substring(0, lineStart) +
-            selectedLines.replace(new RegExp(`^${twoSpaces}`, "gm"), "") +
+            selectedLines.replace(/^  /gm, "") +
             value.substring(actualLineEnd);
           setCode(newValue);
 
@@ -1113,7 +641,6 @@ export const StateEditor: React.FC<StateEditorProps> = ({
                 onChange={(e) =>
                   setHighlightType(e.target.value as HighlightRange["type"])
                 }
-                title="Select highlight type"
                 className="bg-gray-600 text-white px-3 py-1.5 rounded border border-gray-500 text-sm"
               >
                 <option value="new">New Code</option>
@@ -1181,7 +708,6 @@ export const StateEditor: React.FC<StateEditorProps> = ({
                       </div>
                       <button
                         onClick={() => removeHighlight(index)}
-                        title="Remove highlight"
                         className="text-red-400 hover:text-red-300 transition-colors"
                       >
                         <X className="w-3 h-3" />
@@ -1218,18 +744,6 @@ export const StateEditor: React.FC<StateEditorProps> = ({
                 Code
               </label>
               <div className="flex items-center space-x-3">
-                <button
-                  onClick={() => setShowPreview(!showPreview)}
-                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg transition-all text-sm font-medium ${
-                    showPreview
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-600 text-gray-300 hover:bg-gray-500"
-                  }`}
-                  title="Toggle syntax highlighting preview"
-                >
-                  {showPreview ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  <span>{showPreview ? "Hide Preview" : "Show Preview"}</span>
-                </button>
                 {formatMessage && (
                   <motion.div
                     initial={{ opacity: 0, x: 10 }}
@@ -1256,57 +770,24 @@ export const StateEditor: React.FC<StateEditorProps> = ({
                 </button>
               </div>
             </div>
-            
-            {/* Responsive layout that adapts to preview state */}
-            <div className={`flex-1 flex gap-4 min-h-0 ${showPreview ? '' : 'w-full'}`}>
-              {/* Code editor - takes full width when preview is hidden */}
-              <div className={`flex flex-col min-h-0 ${showPreview ? 'flex-1' : 'w-full'}`}>
-                <textarea
-                  ref={textareaRef}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  onMouseUp={handleTextSelection}
-                  placeholder="Paste your code here... (Language will be auto-detected)
+            <textarea
+              ref={textareaRef}
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onMouseUp={handleTextSelection}
+              placeholder="Paste your code here... (Language will be auto-detected)
 
 Try pasting unformatted code like: <div><h1>Hello</h1><p>World</p></div>
 
 Press Tab to indent, Shift+Tab to unindent"
-                  className="flex-1 bg-gray-700 text-white px-4 py-3 rounded-lg border border-gray-600 focus:border-yellow-500 focus:outline-none resize-none min-h-0 font-mono text-sm leading-relaxed"
-                />
-              </div>
-              
-              {/* Syntax highlighted preview - only shown when preview is enabled */}
-              {showPreview && (
-                <motion.div
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className="flex-1 flex flex-col min-h-0"
-                >
-                  <div className="mb-2">
-                    <div className="text-sm font-medium text-gray-300 mb-1">
-                      Preview with Syntax Highlighting
-                    </div>
-                    <div className="text-xs text-gray-400">
-                      Language: {language}
-                    </div>
-                  </div>
-                  <div className="flex-1 bg-gray-800 border border-gray-600 rounded-lg overflow-auto">
-                    <div className="p-4">
-                      {code.trim() ? (
-                        <CodePreview code={code} language={language} />
-                      ) : (
-                        <div className="text-gray-500 text-sm">
-                          Start typing to see syntax highlighting...
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </div>
-            
+              className="flex-1 bg-gray-700 text-white px-4 py-3 rounded-lg border border-gray-600 focus:border-yellow-500 focus:outline-none resize-none min-h-0 font-mono"
+              style={{
+                fontSize: "14px",
+                lineHeight: "1.5",
+                tabSize: 2,
+              }}
+            />
             {code && (
               <div className="mt-2 flex items-center justify-between text-sm">
                 <div className="text-gray-400">
