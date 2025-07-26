@@ -16,7 +16,6 @@ interface StateTimelineProps {
   onStateSelect: (index: number) => void;
   onStateEdit: (state: CodeState, index: number) => void;
   onStateDelete: (stateId: string) => void;
-  isAnimating: boolean;
 }
 
 export const StateTimeline: React.FC<StateTimelineProps> = ({
@@ -24,8 +23,7 @@ export const StateTimeline: React.FC<StateTimelineProps> = ({
   currentStateIndex,
   onStateSelect,
   onStateEdit,
-  onStateDelete,
-  isAnimating
+  onStateDelete
 }) => {
   if (states.length === 0) return null;
 
@@ -41,7 +39,7 @@ export const StateTimeline: React.FC<StateTimelineProps> = ({
                 ? 'bg-gradient-to-r from-yellow-500 to-orange-600 text-white shadow-lg'
                 : 'bg-gray-700/50 text-gray-300 hover:bg-gray-600/50'
             }`}
-            onClick={() => !isAnimating && onStateSelect(index)}
+            onClick={() => onStateSelect(index)}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >

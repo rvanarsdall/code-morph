@@ -11,7 +11,6 @@ interface PlaybackControlsProps {
   canPlay: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
-  isAnimating: boolean;
 }
 
 export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
@@ -23,14 +22,13 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
   playbackSpeed,
   canPlay,
   canGoBack,
-  canGoForward,
-  isAnimating
+  canGoForward
 }) => {
   return (
     <div className="flex items-center space-x-3">
       <button
         onClick={onPrevious}
-        disabled={!canGoBack || isAnimating}
+        disabled={!canGoBack}
         className="p-2 text-gray-400 hover:text-yellow-400 disabled:text-gray-600 transition-colors"
         title="Previous state"
       >
@@ -39,7 +37,7 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
       
       <button
         onClick={onPlayPause}
-        disabled={!canPlay || isAnimating}
+        disabled={!canPlay}
         className="p-3 bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700 text-white rounded-full transition-all disabled:from-gray-600 disabled:to-gray-700"
         title={isPlaying ? 'Pause' : 'Play'}
       >
@@ -48,7 +46,7 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
       
       <button
         onClick={onNext}
-        disabled={!canGoForward || isAnimating}
+        disabled={!canGoForward}
         className="p-2 text-gray-400 hover:text-yellow-400 disabled:text-gray-600 transition-colors"
         title="Next state"
       >

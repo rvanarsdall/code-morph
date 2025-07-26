@@ -220,8 +220,10 @@ function App() {
   };
 
   const goToState = (index: number) => {
-    if (isAnimating || !currentProject) return;
+    if (!currentProject) return;
 
+    // Even if animation is running, we should allow switching to a new state
+    // This will interrupt the current animation and start a new one
     setIsAnimating(true);
     setProjects((prev) =>
       prev.map((p) =>
@@ -396,7 +398,6 @@ function App() {
                 currentProject.currentStateIndex <
                   currentProject.states.length - 1
               }
-              isAnimating={isAnimating}
             />
           </div>
 
@@ -516,7 +517,6 @@ function App() {
               onStateSelect={goToState}
               onStateEdit={handleStateEdit}
               onStateDelete={deleteState}
-              isAnimating={isAnimating}
             />
           </div>
         )}

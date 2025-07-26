@@ -220,12 +220,17 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
 
   // Animation effects with educational timing and state reset
   useEffect(() => {
+    // Store animation timer references for cleanup
+    const timers: NodeJS.Timeout[] = [];
+    
     if (!isAnimating) {
       // Reset the just completed state when starting fresh
       if (animationJustCompleted) {
         setAnimationJustCompleted(false);
       }
-      return;
+      return () => {
+        // No timers to clean up if we're not animating
+      };
     }
 
     // Reset animation key to force remount of motion components
@@ -265,19 +270,30 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
       maxNewElements,
     });
 
+    // Store the completeTimer so we can clear it if the animation is interrupted
     const completeTimer = setTimeout(() => {
       // Set the just completed flag to maintain diff state briefly
       setAnimationJustCompleted(true);
       onAnimationComplete();
 
       // After a short delay, allow the final state to show
-      setTimeout(() => {
+      const finalStateTimer = setTimeout(() => {
         setAnimationJustCompleted(false);
       }, 100); // 100ms delay to let exit animations finish
+      
+      timers.push(finalStateTimer);
     }, totalDuration);
+    
+    timers.push(completeTimer);
 
+    // If this effect is cleaned up (e.g., because a new animation starts),
+    // clear all timers to ensure the animation completes properly
     return () => {
-      clearTimeout(completeTimer);
+      timers.forEach(timer => clearTimeout(timer));
+      
+      // If we're cleaning up due to a state change (and not component unmount),
+      // notify that the animation is complete to reset state in the parent
+      onAnimationComplete();
     };
   }, [
     isAnimating,
