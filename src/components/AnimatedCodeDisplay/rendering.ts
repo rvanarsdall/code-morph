@@ -191,9 +191,17 @@ export function applyManualHighlights(
     const tokenStart = charIndex;
     const tokenEnd = charIndex + token.content.length;
 
-    // Check if this token is within any highlight range
+    // Enhanced overlap detection for more accurate highlighting
     const isHighlighted = highlights.some(
-      (highlight) => tokenStart < highlight.end && tokenEnd > highlight.start
+      (highlight) =>
+        // Token starts inside highlight
+        (tokenStart >= highlight.start && tokenStart < highlight.end) ||
+        // Token ends inside highlight
+        (tokenEnd > highlight.start && tokenEnd <= highlight.end) ||
+        // Token completely surrounds highlight
+        (tokenStart <= highlight.start && tokenEnd >= highlight.end) ||
+        // Token is completely inside highlight
+        (tokenStart >= highlight.start && tokenEnd <= highlight.end)
     );
 
     charIndex = tokenEnd;

@@ -149,13 +149,19 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
       !shouldIgnorePreviousCode
     ) {
       // During animation: include ALL diff tokens (removed ones will fade out, added ones will fade in)
-      tokens = diffResult.map((token, index) => ({
-        ...token,
-        isManuallyHighlighted: checkTokenInHighlightRanges(
+      tokens = diffResult.map((token, index) => {
+        // Mark token as manually highlighted if it's in a highlight range
+        const isHighlighted = checkTokenInHighlightRanges(
           index,
           tokenHighlightRanges
-        ),
-      }));
+        );
+
+        return {
+          ...token,
+          isManuallyHighlighted: isHighlighted,
+          // Preserve token status from diff algorithm
+        };
+      });
     } else {
       // When not animating: only show non-removed tokens (final state)
       tokens = diffResult
@@ -169,6 +175,8 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
         }));
     }
 
+    // When useManualHighlightsOnly is true, we should only render the highlighted tokens
+    // When it's false, we should render ALL tokens but only animate the highlighted ones
     if (useManualHighlightsOnly) {
       // When only showing manually highlighted elements:
       // 1. Filter to only include manually highlighted tokens
@@ -204,6 +212,37 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
       });
 
       return highlightedTokens;
+    } else if (manualHighlights.length > 0) {
+      // When we have manual highlights but useManualHighlightsOnly is false,
+      // we want to render ALL tokens but ONLY animate the manually highlighted ones
+      
+      // First collect all tokens that need to be displayed
+      const processedTokens = tokens.map((token) => {
+        if (token.isManuallyHighlighted) {
+          return {
+            ...token,
+            // Force highlighted tokens to be "added" to ensure they animate properly
+            status: isAnimating ? ("added" as const) : ("unchanged" as const),
+          };
+        }
+        
+        // For all other tokens, force them to be "unchanged" regardless of their diff status
+        // This prevents ANY non-highlighted token from animating in or out
+        return {
+          ...token,
+          // Force ALL non-highlighted tokens to be unchanged to prevent ANY animation
+          status: token.status === "removed" ? "removed" as const : "unchanged" as const,
+        };
+      });
+      
+      console.log("When manual highlights are present:", {
+        totalTokens: processedTokens.length,
+        highlightedTokens: processedTokens.filter(t => t.isManuallyHighlighted).length,
+        addedTokens: processedTokens.filter(t => t.status === "added").length,
+        unchangedTokens: processedTokens.filter(t => t.status === "unchanged").length,
+      });
+      
+      return processedTokens;
     }
 
     return tokens;
@@ -222,7 +261,7 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
   useEffect(() => {
     // Store animation timer references for cleanup
     const timers: NodeJS.Timeout[] = [];
-    
+
     if (!isAnimating) {
       // Reset the just completed state when starting fresh
       if (animationJustCompleted) {
@@ -280,17 +319,17 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
       const finalStateTimer = setTimeout(() => {
         setAnimationJustCompleted(false);
       }, 100); // 100ms delay to let exit animations finish
-      
+
       timers.push(finalStateTimer);
     }, totalDuration);
-    
+
     timers.push(completeTimer);
 
     // If this effect is cleaned up (e.g., because a new animation starts),
     // clear all timers to ensure the animation completes properly
     return () => {
-      timers.forEach(timer => clearTimeout(timer));
-      
+      timers.forEach((timer) => clearTimeout(timer));
+
       // If we're cleaning up due to a state change (and not component unmount),
       // notify that the animation is complete to reset state in the parent
       onAnimationComplete();
@@ -355,7 +394,7 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
               )}
               <pre className="flex-1 m-0 p-0 overflow-visible whitespace-pre-wrap font-mono">
                 <AnimatePresence
-                  mode="popLayout"
+                  mode="sync"
                   key={`animate-presence-${animationKey}`}
                 >
                   {tokens.map((token, index) => (
@@ -386,6 +425,17 @@ const TokenComponent = React.forwardRef<
   }
 >(({ token, index, isAnimating }, ref) => {
   const getAnimationProps = () => {
+    // If not animating, just display everything as is
+    if (!isAnimating) {
+      return {
+        initial: { opacity: 1 },
+        animate: { opacity: 1 },
+        // Disable layout animations when not actively animating
+        layout: false,
+        layoutId: undefined,
+      };
+    }
+    
     // Debug the token status for manually highlighted tokens
     if (token.isManuallyHighlighted) {
       console.log("Animating manually highlighted token:", {
@@ -395,16 +445,9 @@ const TokenComponent = React.forwardRef<
       });
     }
 
-    if (!isAnimating) {
-      return {
-        initial: { opacity: 1 },
-        animate: { opacity: 1 },
-      };
-    }
-
-    // Enhanced handling for manual highlights
-    if (token.status === "added" || token.isManuallyHighlighted) {
-      // New elements or manually highlighted: Start hidden, appear after positioning + pause
+    // Specifically animate tokens marked as "added"
+    if (token.status === "added") {
+      // Animate "added" tokens with a nice fade-in effect
       return {
         initial: { opacity: 0, scale: 0.7, y: -15 },
         animate: {
@@ -427,8 +470,9 @@ const TokenComponent = React.forwardRef<
             index * ANIMATION_TIMINGS.NEW_ELEMENT_STAGGER_DELAY,
           ease: ANIMATION_TIMINGS.NEW_ELEMENT_EASING,
         },
-        layout: isAnimating,
-        layoutId: isAnimating ? token.id : undefined,
+        // Layout animation can cause unwanted movement, so we'll be specific about it
+        layout: token.isManuallyHighlighted,
+        layoutId: token.isManuallyHighlighted ? token.id : undefined,
       };
     } else if (token.status === "removed") {
       // Removed elements: Start visible, then fade out quickly during the first phase
@@ -441,30 +485,24 @@ const TokenComponent = React.forwardRef<
           y: -20,
         },
         transition: {
-          duration: ANIMATION_TIMINGS.EXISTING_ELEMENT_DURATION * 0.8, // Slightly longer for cleaner exit
+          duration: ANIMATION_TIMINGS.EXISTING_ELEMENT_DURATION * 0.8,
           delay: 0, // Start immediately
           ease: "easeOut" as const,
         },
-        layout: isAnimating,
-        layoutId: isAnimating ? token.id : undefined,
+        layout: false, // Disable layout animation for removed elements
+        layoutId: undefined,
       };
     } else {
-      // Unchanged tokens - these move to new positions during positioning phase
+      // Unchanged tokens - display them immediately with no animation to prevent flickering
       return {
-        initial: { opacity: 1, scale: 1 },
-        animate: {
-          opacity: 1,
-          scale: 1,
-          y: 0,
-          x: 0,
-        },
+        initial: { opacity: 1 },
+        animate: { opacity: 1 },
         transition: {
-          duration: ANIMATION_TIMINGS.EXISTING_ELEMENT_DURATION,
-          ease: ANIMATION_TIMINGS.EXISTING_ELEMENT_EASING,
-          // No delay - these move immediately
+          duration: 0, // No duration for stable display
         },
-        layout: isAnimating,
-        layoutId: isAnimating ? token.id : undefined,
+        // Disable layout animation for unchanged elements to prevent them from moving
+        layout: false,
+        layoutId: undefined,
       };
     }
   };
@@ -527,6 +565,7 @@ function convertManualHighlightsToTokenRanges(
       highlightRange: `${start}-${end}`,
       highlightedText: originalCode.substring(start, end),
       totalCodeLength: originalCode.length,
+      highlightLength: end - start,
     });
 
     // Check each token to see if it falls within the highlight range
@@ -546,7 +585,8 @@ function convertManualHighlightsToTokenRanges(
       const isOverlapping =
         (tokenStart >= start && tokenStart < end) || // Token starts inside highlight
         (tokenEnd > start && tokenEnd <= end) || // Token ends inside highlight
-        (tokenStart <= start && tokenEnd >= end); // Token completely surrounds highlight
+        (tokenStart <= start && tokenEnd >= end) || // Token completely surrounds highlight
+        (tokenStart >= start && tokenEnd <= end); // Token is completely inside highlight
 
       if (isOverlapping) {
         tokenIndices.push(index);

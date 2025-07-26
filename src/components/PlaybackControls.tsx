@@ -1,5 +1,5 @@
-import React from 'react';
-import { Play, Pause, SkipBack, SkipForward } from 'lucide-react';
+import React from "react";
+import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
 
 interface PlaybackControlsProps {
   isPlaying: boolean;
@@ -22,7 +22,7 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
   playbackSpeed,
   canPlay,
   canGoBack,
-  canGoForward
+  canGoForward,
 }) => {
   return (
     <div className="flex items-center space-x-3">
@@ -34,16 +34,20 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
       >
         <SkipBack className="w-5 h-5" />
       </button>
-      
+
       <button
         onClick={onPlayPause}
         disabled={!canPlay}
         className="p-3 bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700 text-white rounded-full transition-all disabled:from-gray-600 disabled:to-gray-700"
-        title={isPlaying ? 'Pause' : 'Play'}
+        title={isPlaying ? "Pause" : "Play"}
       >
-        {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+        {isPlaying ? (
+          <Pause className="w-5 h-5" />
+        ) : (
+          <Play className="w-5 h-5" />
+        )}
       </button>
-      
+
       <button
         onClick={onNext}
         disabled={!canGoForward}
@@ -52,7 +56,7 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
       >
         <SkipForward className="w-5 h-5" />
       </button>
-      
+
       <select
         value={playbackSpeed}
         onChange={(e) => onSpeedChange(Number(e.target.value))}
