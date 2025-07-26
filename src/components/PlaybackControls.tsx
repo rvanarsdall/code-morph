@@ -61,6 +61,9 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
         className="bg-gray-700/50 text-white px-3 py-2 rounded-lg text-sm border border-gray-600 focus:border-yellow-500 focus:outline-none"
         title="Playback speed"
       >
+        <option value={500}>Very Fast (0.5s)</option>
+        <option value={750}>Faster (0.75s)</option>
+        <option value={1000}>Normal (1s)</option>
         <option value={1500}>Fast (1.5s)</option>
         <option value={2500}>Normal (2.5s)</option>
         <option value={4000}>Slow (4s)</option>

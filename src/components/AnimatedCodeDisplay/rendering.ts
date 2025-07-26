@@ -15,24 +15,29 @@ export interface RenderToken extends DiffToken {
  */
 export function getTokenColor(token: CodeToken | RenderToken): string {
   switch (token.type) {
+    // HTML specific colors
     case "tag":
-      return "#ff6b6b";
+      return "#ff6b6b"; // Red for HTML tags
     case "attribute":
-      return "#a8e6cf";
-    case "keyword":
-      return "#4ecdc4";
+      return "#4fc3f7"; // Light blue for HTML attributes
     case "string":
-      return "#95e1d3";
-    case "number":
-      return "#ff8b94";
+      return "#a5d6a7"; // Light green for attribute values/strings
     case "operator":
-      return "#fce38a";
+      return "#fff59d"; // Light yellow for operators (=, +, etc)
+
+    // General programming colors
+    case "keyword":
+      return "#ce93d8"; // Light purple for keywords
+    case "number":
+      return "#ffab91"; // Light orange for numbers
     case "comment":
-      return "#6c757d";
+      return "#757575"; // Gray for comments
     case "punctuation":
-      return "#ffd93d";
+      return "#ffd93d"; // Yellow for punctuation
+    case "text":
+      return "#ffffff"; // White for plain text
     default:
-      return "#ffffff";
+      return "#ffffff"; // Default to white
   }
 }
 

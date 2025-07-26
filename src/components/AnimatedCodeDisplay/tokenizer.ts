@@ -60,59 +60,124 @@ const tokenizeHTML = (
 ): CodeToken[] => {
   const tokens: CodeToken[] = [];
   let localCounter = localCounterStart;
-  const htmlRegex = /(<\/?[a-zA-Z][^>]*>)|(\s+)|([^<\s]+)/g;
-  let match;
+  let i = 0;
 
-  while ((match = htmlRegex.exec(code)) !== null) {
-    const content = match[0];
-    const startPos = match.index;
+  while (i < code.length) {
+    const remaining = code.slice(i);
 
-    if (match[1]) {
-      // HTML tag - parse it for attributes
-      const tagContent = content;
-      const tagRegex =
-        /(<\/?[a-zA-Z][a-zA-Z0-9]*)|(\s+)|([a-zA-Z-]+)(=)("[^"]*"|'[^']*'|[^\s>]+)?|(>)/g;
-      let tagMatch;
-      let subIndex = 0;
+    // Match opening tags and closing tags
+    if (remaining.startsWith("<")) {
+      let tagEnd = i + 1;
+      let isClosingTag = false;
 
-      while ((tagMatch = tagRegex.exec(tagContent)) !== null) {
-        const part = tagMatch[0];
-        let type: CodeToken["type"] = "tag";
-
-        if (tagMatch[1]) type = "tag";
-        else if (tagMatch[2]) type = "whitespace";
-        else if (tagMatch[3]) type = "attribute";
-        else if (tagMatch[4]) type = "operator";
-        else if (tagMatch[5]) type = "string";
-        else if (tagMatch[6]) type = "tag";
-
-        if (part) {
-          const uniqueId = `${sessionId}-${type}-${globalTokenCounter++}-${localCounter++}-${startPos}-${subIndex}`;
-          tokens.push({
-            type,
-            content: part,
-            id: uniqueId,
-          });
-          subIndex++;
-        }
+      // Check if it's a closing tag
+      if (code[i + 1] === "/") {
+        isClosingTag = true;
+        tagEnd++;
       }
-    } else if (match[2]) {
-      // Whitespace
-      const uniqueId = `${sessionId}-whitespace-${globalTokenCounter++}-${localCounter++}-${startPos}`;
-      tokens.push({
-        type: "whitespace",
-        content: content,
-        id: uniqueId,
-      });
-    } else {
-      // Regular text content
-      const uniqueId = `${sessionId}-text-${globalTokenCounter++}-${localCounter++}-${startPos}`;
-      tokens.push({
-        type: "text",
-        content: content,
-        id: uniqueId,
-      });
+
+      // Find the tag name
+      while (tagEnd < code.length && /[a-zA-Z0-9]/.test(code[tagEnd])) {
+        tagEnd++;
+      }
+
+      if (tagEnd > i + (isClosingTag ? 2 : 1)) {
+        // Valid tag found
+        const tagContent = code.substring(i, tagEnd);
+        tokens.push({
+          type: "tag",
+          content: tagContent,
+          id: `${sessionId}-tag-${globalTokenCounter++}-${localCounter++}-${i}`,
+        });
+        i = tagEnd;
+        continue;
+      }
     }
+
+    // Match closing bracket of a tag
+    if (remaining.startsWith(">")) {
+      tokens.push({
+        type: "tag",
+        content: ">",
+        id: `${sessionId}-tag-${globalTokenCounter++}-${localCounter++}-${i}`,
+      });
+      i++;
+      continue;
+    }
+
+    // Match self-closing tag ending
+    if (remaining.startsWith("/>")) {
+      tokens.push({
+        type: "tag",
+        content: "/>",
+        id: `${sessionId}-tag-${globalTokenCounter++}-${localCounter++}-${i}`,
+      });
+      i += 2;
+      continue;
+    }
+
+    // Match HTML attributes (must be inside a tag)
+    const attrMatch = /^[a-zA-Z][a-zA-Z0-9\-_:]*/.exec(remaining);
+    if (attrMatch && attrMatch[0]) {
+      tokens.push({
+        type: "attribute",
+        content: attrMatch[0],
+        id: `${sessionId}-attribute-${globalTokenCounter++}-${localCounter++}-${i}`,
+      });
+      i += attrMatch[0].length;
+      continue;
+    }
+
+    // Match equals sign
+    if (remaining.startsWith("=")) {
+      tokens.push({
+        type: "operator",
+        content: "=",
+        id: `${sessionId}-operator-${globalTokenCounter++}-${localCounter++}-${i}`,
+      });
+      i++;
+      continue;
+    }
+
+    // Match attribute values in quotes
+    if (remaining.startsWith('"') || remaining.startsWith("'")) {
+      const quote = remaining[0];
+      let end = i + 1;
+      while (end < code.length && code[end] !== quote) {
+        end++;
+      }
+      if (end < code.length) end++; // Include closing quote
+
+      tokens.push({
+        type: "string", // Use string type for attribute values
+        content: code.substring(i, end),
+        id: `${sessionId}-string-${globalTokenCounter++}-${localCounter++}-${i}`,
+      });
+      i = end;
+      continue;
+    }
+
+    // Handle whitespace
+    if (/^\s+/.test(remaining)) {
+      const match = /^\s+/.exec(remaining);
+      if (match && match[0]) {
+        tokens.push({
+          type: "whitespace",
+          content: match[0],
+          id: `${sessionId}-whitespace-${globalTokenCounter++}-${localCounter++}-${i}`,
+        });
+        i += match[0].length;
+        continue;
+      }
+    }
+
+    // Handle regular text content (anything else)
+    tokens.push({
+      type: "text",
+      content: code[i],
+      id: `${sessionId}-text-${globalTokenCounter++}-${localCounter++}-${i}`,
+    });
+    i++;
   }
 
   return tokens;
@@ -423,33 +488,104 @@ const tokenizeCSS = (
 
       // CSS Properties
       const cssProperties = [
-        "color", "background", "background-color", "font-size", "font-family", 
-        "font-weight", "margin", "padding", "border", "width", "height", 
-        "display", "position", "top", "left", "right", "bottom", "z-index",
-        "opacity", "transform", "transition", "animation", "flex", "grid",
-        "justify-content", "align-items", "text-align", "line-height",
-        "box-shadow", "border-radius", "overflow", "visibility", "cursor",
-        "pointer-events", "user-select", "white-space", "text-decoration",
-        "vertical-align", "float", "clear", "content", "list-style",
-        "outline", "resize", "min-width", "max-width", "min-height", "max-height"
+        "color",
+        "background",
+        "background-color",
+        "font-size",
+        "font-family",
+        "font-weight",
+        "margin",
+        "padding",
+        "border",
+        "width",
+        "height",
+        "display",
+        "position",
+        "top",
+        "left",
+        "right",
+        "bottom",
+        "z-index",
+        "opacity",
+        "transform",
+        "transition",
+        "animation",
+        "flex",
+        "grid",
+        "justify-content",
+        "align-items",
+        "text-align",
+        "line-height",
+        "box-shadow",
+        "border-radius",
+        "overflow",
+        "visibility",
+        "cursor",
+        "pointer-events",
+        "user-select",
+        "white-space",
+        "text-decoration",
+        "vertical-align",
+        "float",
+        "clear",
+        "content",
+        "list-style",
+        "outline",
+        "resize",
+        "min-width",
+        "max-width",
+        "min-height",
+        "max-height",
       ];
 
       // CSS Pseudo-classes and pseudo-elements
       const cssPseudos = [
-        "hover", "focus", "active", "visited", "first-child", "last-child",
-        "nth-child", "before", "after", "first-line", "first-letter"
+        "hover",
+        "focus",
+        "active",
+        "visited",
+        "first-child",
+        "last-child",
+        "nth-child",
+        "before",
+        "after",
+        "first-line",
+        "first-letter",
       ];
 
       // CSS Values and Keywords
       const cssValues = [
-        "auto", "none", "inherit", "initial", "unset", "normal", "bold",
-        "italic", "underline", "center", "left", "right", "block", "inline",
-        "flex", "grid", "absolute", "relative", "fixed", "static", "sticky",
-        "hidden", "visible", "transparent", "solid", "dashed", "dotted"
+        "auto",
+        "none",
+        "inherit",
+        "initial",
+        "unset",
+        "normal",
+        "bold",
+        "italic",
+        "underline",
+        "center",
+        "left",
+        "right",
+        "block",
+        "inline",
+        "flex",
+        "grid",
+        "absolute",
+        "relative",
+        "fixed",
+        "static",
+        "sticky",
+        "hidden",
+        "visible",
+        "transparent",
+        "solid",
+        "dashed",
+        "dotted",
       ];
 
       let type: CodeToken["type"] = "text";
-      
+
       if (cssProperties.includes(word)) {
         type = "attribute"; // CSS properties
       } else if (cssPseudos.includes(word)) {

@@ -43,7 +43,7 @@ function App() {
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(2500);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1500);
   const [showSettings, setShowSettings] = useState(false);
 
   // State Editor
