@@ -82,12 +82,10 @@ export function getTokenDisplayStyles(token: RenderToken): React.CSSProperties {
     whiteSpace: "pre-wrap",
   };
 
-  // Manual highlight background
-  if (token.isManuallyHighlighted) {
-    styles.backgroundColor = "rgba(255, 215, 0, 0.2)";
-    styles.border = "1px solid rgba(255, 215, 0, 0.5)";
-    styles.borderRadius = "2px";
-  }
+  // We removed the yellow highlighting but still need to mark
+  // manually highlighted tokens so they can be animated correctly.
+  // This is done using the isManuallyHighlighted flag and CSS classes,
+  // not through inline styles anymore.
 
   return styles;
 }

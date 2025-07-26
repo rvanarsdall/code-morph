@@ -124,6 +124,21 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
   ]);
 
   const renderTokens = useMemo(() => {
+    // Convert manual highlights from character positions to token indices
+    const tokenHighlightRanges = convertManualHighlightsToTokenRanges(
+      manualHighlights,
+      tokenizedCodes.currentTokens
+    );
+
+    // Log highlight info to help debugging
+    if (manualHighlights.length > 0) {
+      console.log("Manual highlights:", {
+        ranges: manualHighlights,
+        mappedTokenRanges: tokenHighlightRanges,
+        totalTokensHighlighted: tokenHighlightRanges.flat().length,
+      });
+    }
+
     // During animation or just after completion, show ALL tokens (removed, unchanged, and added)
     // This ensures the user sees the full transformation from previous to current state
     let tokens;
@@ -136,10 +151,9 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
       // During animation: include ALL diff tokens (removed ones will fade out, added ones will fade in)
       tokens = diffResult.map((token, index) => ({
         ...token,
-        isManuallyHighlighted: checkManualHighlight(
-          token,
+        isManuallyHighlighted: checkTokenInHighlightRanges(
           index,
-          manualHighlights
+          tokenHighlightRanges
         ),
       }));
     } else {
@@ -148,16 +162,48 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
         .filter((token) => token.status !== "removed")
         .map((token, index) => ({
           ...token,
-          isManuallyHighlighted: checkManualHighlight(
-            token,
+          isManuallyHighlighted: checkTokenInHighlightRanges(
             index,
-            manualHighlights
+            tokenHighlightRanges
           ),
         }));
     }
 
     if (useManualHighlightsOnly) {
-      return tokens.filter((token) => token.isManuallyHighlighted);
+      // When only showing manually highlighted elements:
+      // 1. Filter to only include manually highlighted tokens
+      // 2. Ensure they're treated as "added" for animation purposes
+
+      // Check if we actually have highlighted tokens
+      const hasHighlightedTokens = tokens.some(
+        (token) => token.isManuallyHighlighted
+      );
+
+      if (!hasHighlightedTokens) {
+        // No manual highlights were detected, this could be due to character position mapping issues
+        // Fall back to the standard diff for a better user experience
+        console.warn(
+          "No manually highlighted tokens found despite having manual highlights defined."
+        );
+        return tokens;
+      }
+
+      const highlightedTokens = tokens
+        .filter((token) => token.isManuallyHighlighted)
+        .map((token) => ({
+          ...token,
+          // Force tokens to be "added" to ensure they animate properly with the correct type
+          status: isAnimating ? ("added" as const) : ("unchanged" as const),
+        }));
+
+      // Log the highlighted tokens for debugging
+      console.log("Manual highlights only mode:", {
+        totalHighlightedTokens: highlightedTokens.length,
+        firstFewTokens: highlightedTokens.slice(0, 5).map((t) => t.content),
+        highlightRanges: manualHighlights,
+      });
+
+      return highlightedTokens;
     }
 
     return tokens;
@@ -169,6 +215,7 @@ const AnimatedCodeDisplay: React.FC<AnimatedCodeDisplayProps> = ({
     animationJustCompleted,
     previousCode,
     shouldIgnorePreviousCode,
+    tokenizedCodes.currentTokens,
   ]);
 
   // Animation effects with educational timing and state reset
@@ -323,6 +370,15 @@ const TokenComponent = React.forwardRef<
   }
 >(({ token, index, isAnimating }, ref) => {
   const getAnimationProps = () => {
+    // Debug the token status for manually highlighted tokens
+    if (token.isManuallyHighlighted) {
+      console.log("Animating manually highlighted token:", {
+        content: token.content,
+        status: token.status,
+        isAnimating,
+      });
+    }
+
     if (!isAnimating) {
       return {
         initial: { opacity: 1 },
@@ -330,8 +386,9 @@ const TokenComponent = React.forwardRef<
       };
     }
 
-    if (token.status === "added") {
-      // New elements: Start hidden, appear after positioning + pause
+    // Enhanced handling for manual highlights
+    if (token.status === "added" || token.isManuallyHighlighted) {
+      // New elements or manually highlighted: Start hidden, appear after positioning + pause
       return {
         initial: { opacity: 0, scale: 0.7, y: -15 },
         animate: {
@@ -430,20 +487,72 @@ function checkForDuplicateIds(tokens: CodeToken[]): string[] {
   return duplicates;
 }
 
-function checkManualHighlight(
-  _token: CodeToken,
-  index: number,
-  manualHighlights: HighlightRange[] = []
-): boolean {
-  // Calculate the character position of this token
-  // This is a simplified implementation - for more accuracy, you'd need to calculate
-  // the actual character position based on the token's position in the reconstructed code
-  const tokenPosition = index;
+/**
+ * Convert character-based highlight ranges to token-based highlight ranges
+ * by mapping each highlight range to the tokens it covers
+ */
+function convertManualHighlightsToTokenRanges(
+  manualHighlights: HighlightRange[],
+  tokens: CodeToken[]
+): number[][] {
+  if (!manualHighlights.length) return [];
 
-  return manualHighlights.some(
-    (highlight) =>
-      tokenPosition >= highlight.start && tokenPosition <= highlight.end
-  );
+  // For each highlight range, find all token indices that fall within that range
+  return manualHighlights.map((highlight) => {
+    const { start, end } = highlight;
+    const tokenIndices: number[] = [];
+
+    // Track character position as we iterate through tokens
+    let charPos = 0;
+
+    // Debug the original code to reconstruct and verify character positions
+    const originalCode = tokens.map((t) => t.content).join("");
+    console.log("Manual highlight conversion debug:", {
+      highlightRange: `${start}-${end}`,
+      highlightedText: originalCode.substring(start, end),
+      totalCodeLength: originalCode.length,
+    });
+
+    // Check each token to see if it falls within the highlight range
+    tokens.forEach((token, index) => {
+      const tokenStart = charPos;
+      const tokenEnd = charPos + token.content.length;
+
+      // Debug token positions for troubleshooting
+      if (index < 10 || (tokenStart <= end && tokenEnd >= start)) {
+        console.log(
+          `Token ${index}: '${token.content}' (${tokenStart}-${tokenEnd})`
+        );
+      }
+
+      // Enhanced overlap detection logic for more accurate highlight matching
+      // A token is considered part of the highlight if any portion of it overlaps with the highlight range
+      const isOverlapping =
+        (tokenStart >= start && tokenStart < end) || // Token starts inside highlight
+        (tokenEnd > start && tokenEnd <= end) || // Token ends inside highlight
+        (tokenStart <= start && tokenEnd >= end); // Token completely surrounds highlight
+
+      if (isOverlapping) {
+        tokenIndices.push(index);
+        console.log(`  ✓ Including token ${index}: '${token.content}'`);
+      }
+
+      // Update character position
+      charPos += token.content.length;
+    });
+
+    return tokenIndices;
+  });
+}
+
+/**
+ * Check if a token index is in any of the token-based highlight ranges
+ */
+function checkTokenInHighlightRanges(
+  tokenIndex: number,
+  tokenHighlightRanges: number[][]
+): boolean {
+  return tokenHighlightRanges.some((range) => range.includes(tokenIndex));
 }
 
 export { AnimatedCodeDisplay };

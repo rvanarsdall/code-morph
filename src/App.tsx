@@ -124,6 +124,14 @@ function App() {
     setCurrentProjectId(newProject.id);
   };
 
+  const renameProject = (projectId: string, newName: string) => {
+    setProjects((prev) =>
+      prev.map((project) =>
+        project.id === projectId ? { ...project, name: newName } : project
+      )
+    );
+  };
+
   const deleteProject = (projectId: string) => {
     if (projects.length <= 1) return; // Don't delete the last project
 
@@ -329,12 +337,14 @@ function App() {
                 onExportProject={exportProject}
                 onImportProject={importProject}
                 onDeleteProject={deleteProject}
+                onRenameProject={renameProject}
               />
             </div>
             <div className="flex items-center space-x-3">
               <button
                 onClick={() => setShowSettings(!showSettings)}
                 className="p-2 text-gray-400 hover:text-yellow-400 transition-colors"
+                title="Settings"
               >
                 <Settings className="w-5 h-5" />
               </button>
@@ -466,6 +476,8 @@ function App() {
                         })
                       }
                       className="w-full accent-yellow-500"
+                      title="Font size"
+                      aria-label="Font size"
                     />
                     <span className="text-sm text-gray-400">
                       {currentProject?.settings.fontSize}px
@@ -483,6 +495,8 @@ function App() {
                           })
                         }
                         className="mr-2 accent-yellow-500"
+                        aria-label="Show line numbers"
+                        title="Show line numbers"
                       />
                       Show line numbers
                     </label>
